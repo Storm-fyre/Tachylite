@@ -269,6 +269,7 @@ export default function GraphView({
   const linksRef = useRef([]);
   const neighborMapRef = useRef(new Map());
   const cameraRef = useRef({ x: 0, y: 0, k: 0.35 });
+  const overviewScaleRef = useRef(0.35);
   const hoveredNodeRef = useRef(null);
   const draggedNodeRef = useRef(null);
   const labelCacheRef = useRef(new Map());
@@ -281,13 +282,17 @@ export default function GraphView({
   themeRef.current = themeColors;
   activeNoteRef.current = activeNotePath;
 
-  // Delicate pinpoint screen-space radius (matches Obsidian desktop & mobile proportions)
+  // Obsidian-proportioned screen-space radius: crisp tiny leaves, distinct bold hubs
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
-    const zoomScale = Math.min(1.35, Math.max(0.72, Math.pow(Math.max(0.18, camK), 0.16)));
+    const relZoom =
+      mode === 'local'
+        ? 1.05
+        : camK / Math.max(0.05, overviewScaleRef.current);
+    const zoomScale = Math.min(1.42, Math.max(0.78, 0.78 + Math.log2(Math.max(1, relZoom)) * 0.22));
     if (node.unresolved) return 1.5 * mult * zoomScale;
-    const base = 1.45 + Math.sqrt(node.degree || 0) * 0.48;
-    return Math.min(5.8, base) * mult * zoomScale;
+    const base = 1.45 + Math.pow(node.degree || 0, 0.56) * 0.62;
+    return Math.min(9.0, base) * mult * zoomScale;
   };
 
   const fitViewToNodes = () => {
@@ -313,13 +318,17 @@ export default function GraphView({
 
     if (!Number.isFinite(minX)) return;
 
-    const spanX = Math.max(180, maxX - minX);
-    const spanY = Math.max(180, maxY - minY);
-    const pad = mode === 'local' ? 0.68 : 0.86;
+    const spanX = Math.max(200, maxX - minX);
+    const spanY = Math.max(200, maxY - minY);
+    const pad = mode === 'local' ? 0.68 : 0.84;
     const k = Math.min(
       mode === 'local' ? 1.35 : 1.05,
-      Math.max(0.06, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
+      Math.max(0.05, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
     );
+
+    if (mode === 'global') {
+      overviewScaleRef.current = k;
+    }
 
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
@@ -332,7 +341,7 @@ export default function GraphView({
     drawRef.current();
   };
 
-  // Initialize / update force simulation with airy starburst spacing
+  // Global repulsion separates all hubs into islands; 6 link iterations keep spokes stiff & round
   useEffect(() => {
     const nodes = graphData.nodes;
     const links = graphData.links;
@@ -363,32 +372,25 @@ export default function GraphView({
 
     if (simRef.current) simRef.current.stop();
 
-const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
-
     const sim = forceSimulation(nodes)
       .force(
         'link',
         forceLink(links)
           .id((d) => d.id)
-          .distance(settings.linkDistance * 0.55)
-          .strength(Math.min(1, settings.linkStrength * 0.95))
-          .iterations(4)
+          .distance(settings.linkDistance * 0.72)
+          .strength(Math.min(1, settings.linkStrength * 1.1))
+          .iterations(6)
       )
-      .force(
-        'charge',
-        forceManyBody()
-          .strength(-settings.repelStrength * 42)
-          .distanceMax(maxRepelDist)
-      )
-      .force('x', forceX(0).strength(settings.centerStrength * 0.08))
-      .force('y', forceY(0).strength(settings.centerStrength * 0.08))
+      .force('charge', forceManyBody().strength(-settings.repelStrength * 48))
+      .force('x', forceX(0).strength(settings.centerStrength * 0.11))
+      .force('y', forceY(0).strength(settings.centerStrength * 0.11))
       .force(
         'collide',
-        forceCollide((d) => 10 + Math.sqrt(d.degree || 0) * 1.5)
+        forceCollide((d) => 11 + Math.sqrt(d.degree || 0) * 2.2)
       )
       .alphaDecay(0.025);
 
-    sim.tick(prevPos.size === 0 ? 200 : 50);
+    sim.tick(prevPos.size === 0 ? 180 : 45);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -410,20 +412,18 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
     const linkForce = sim.force('link');
     if (linkForce) {
       linkForce
-        .distance(settings.linkDistance * 0.55)
-        .strength(Math.min(1, settings.linkStrength * 0.95))
-        .iterations(4);
+        .distance(settings.linkDistance * 0.72)
+        .strength(Math.min(1, settings.linkStrength * 1.1))
+        .iterations(6);
     }
     const chargeForce = sim.force('charge');
     if (chargeForce) {
-      chargeForce
-        .strength(-settings.repelStrength * 42)
-        .distanceMax(Math.max(220, settings.linkDistance * 1.85));
+      chargeForce.strength(-settings.repelStrength * 48);
     }
     const xForce = sim.force('x');
     const yForce = sim.force('y');
-    if (xForce) xForce.strength(settings.centerStrength * 0.08);
-    if (yForce) yForce.strength(settings.centerStrength * 0.08);
+    if (xForce) xForce.strength(settings.centerStrength * 0.11);
+    if (yForce) yForce.strength(settings.centerStrength * 0.11);
 
     sim.alpha(0.35).restart();
   }, [
@@ -508,7 +508,7 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         if (hovered) {
           ctx.globalAlpha = isConnectedToHover ? 0.95 : 0.06;
         } else {
-          ctx.globalAlpha = l.unresolved ? 0.18 : 0.55;
+          ctx.globalAlpha = l.unresolved ? 0.18 : 0.52;
         }
         ctx.strokeStyle = isConnectedToHover ? colors.lineActive : colors.line;
         ctx.lineWidth = isConnectedToHover ? screenLineWidth * 1.65 : screenLineWidth;
@@ -541,7 +541,7 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         ctx.restore();
       }
 
-      // 2. Draw delicate pinpoint nodes
+      // 2. Draw nodes
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
@@ -561,7 +561,7 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         }
 
         ctx.beginPath();
-        ctx.arc(sx, sy, isHovered ? Math.max(r * 1.3, 4.5) : r, 0, Math.PI * 2);
+        ctx.arc(sx, sy, isHovered ? Math.max(r * 1.25, 4.5) : r, 0, Math.PI * 2);
         ctx.fillStyle = isHovered
           ? colors.accent
           : n.unresolved
@@ -577,9 +577,13 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         ctx.restore();
       }
 
-      // 3. Draw wrapped screen-space labels
-      const fadeMetric = cam.k * Math.pow(2, cfg.textFadeMultiplier || 0);
-      const baseLabelAlpha = Math.min(1, Math.max(0, (fadeMetric - 0.52) / 0.42));
+      // 3. Relative-zoom label fade: 100% clean at overview, fades in cleanly around ~2x zoom
+      let baseLabelAlpha = 0.85;
+      if (mode === 'global') {
+        const relZoom = cam.k / Math.max(0.05, overviewScaleRef.current);
+        const fadeMetric = relZoom * Math.pow(2, cfg.textFadeMultiplier || 0);
+        baseLabelAlpha = Math.min(1, Math.max(0, (fadeMetric - 1.35) / 0.65));
+      }
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -615,7 +619,7 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         ctx.save();
         ctx.globalAlpha = isHovered ? 1 : alpha * 0.86;
         ctx.fillStyle = colors.text;
-        const startY = sy + (isHovered ? Math.max(r * 1.3, 4.5) : r) + 5;
+        const startY = sy + (isHovered ? Math.max(r * 1.25, 4.5) : r) + 5;
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i], sx, startY + i * 13);
         }
@@ -679,7 +683,6 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
       canvas.setPointerCapture(e.pointerId);
       activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      // Two-finger touch pinch start
       if (activePointers.size === 2) {
         clearLongPressTimer();
         isLongPress = false;
@@ -705,7 +708,6 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         if (hit) {
           touchTargetNode = hit;
           clearLongPressTimer();
-          // Press-and-hold (~200ms) lights up connections just like Obsidian Mobile
           longPressTimer = setTimeout(() => {
             isLongPress = true;
             hoveredNodeRef.current = hit;
@@ -723,7 +725,6 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         return;
       }
 
-      // Mouse / pen interaction
       if (hit) {
         draggedNodeRef.current = hit;
         hoveredNodeRef.current = hit;
@@ -740,7 +741,6 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }
 
-      // Two-finger pinch zoom
       if (activePointers.size === 2) {
         const pts = [...activePointers.values()];
         const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
@@ -762,7 +762,6 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
 
       const distFromStart = Math.hypot(e.clientX - startClient.x, e.clientY - startClient.y);
 
-      // If user starts dragging a touched node before 200ms elapses, switch cleanly into node drag + spotlight
       if (e.pointerType === 'touch' && touchTargetNode && !draggedNodeRef.current && distFromStart > 7) {
         clearLongPressTimer();
         isLongPress = true;
@@ -824,13 +823,11 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
         }
 
         if (isLongPress) {
-          // Released after press-and-hold or drag: dismiss spotlight without navigating
           hoveredNodeRef.current = null;
           isLongPress = false;
           touchTargetNode = null;
           draw();
         } else if (touchTargetNode && movedDist < 7 && !touchTargetNode.unresolved && onSelectNote) {
-          // Clean quick tap: open the note
           const target = touchTargetNode;
           touchTargetNode = null;
           onSelectNote(target.path, false);
@@ -892,7 +889,7 @@ const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
       canvas.removeEventListener('pointercancel', onPointerUp);
       canvas.removeEventListener('wheel', onWheel);
     };
-  }, [onSelectNote]);
+  }, [onSelectNote, mode]);
 
   return (
     <div className="obs-graph-wrap" ref={wrapRef}>
