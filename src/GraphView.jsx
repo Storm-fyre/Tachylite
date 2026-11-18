@@ -112,6 +112,50 @@ function wrapLabelLines(ctx, text, maxWidth, maxLines = 2) {
   return lines.slice(0, maxLines);
 }
 
+function computeLinkDistance(link, baseDistance) {
+  const sDeg = (typeof link.source === 'object' ? link.source.degree : 1) || 1;
+  const tDeg = (typeof link.target === 'object' ? link.target.degree : 1) || 1;
+  const minDeg = Math.min(sDeg, tDeg);
+  const maxDeg = Math.max(sDeg, tDeg);
+
+  // 1-connection summary/leaf attached to a chapter note: keep snug & tucked close
+  if (minDeg <= 1 && maxDeg <= 5) {
+    return baseDistance * 0.36;
+  }
+  // Hub-to-chapter spokes: moderate distance with slight natural stagger
+  if (maxDeg >= 8 && minDeg <= 4) {
+    const jitter = ((sDeg * 7 + tDeg * 13) % 5) * 0.04;
+    return baseDistance * (0.68 + jitter);
+  }
+  // Cross-cluster or hub-to-hub bridges: allow wider separation between islands
+  return baseDistance * 1.25;
+}
+
+function computeLinkStrength(link, baseStrength) {
+  const sDeg = (typeof link.source === 'object' ? link.source.degree : 1) || 1;
+  const tDeg = (typeof link.target === 'object' ? link.target.degree : 1) || 1;
+  const minDeg = Math.min(sDeg, tDeg);
+  const maxDeg = Math.max(sDeg, tDeg);
+
+  // Snug tether for leaf/summary notes
+  if (minDeg <= 1) {
+    return Math.min(1, baseStrength * 0.88);
+  }
+  // Hub-to-chapter spoke
+  if (maxDeg >= 8 && minDeg <= 4) {
+    return Math.min(1, baseStrength * 0.58);
+  }
+  // Soften cross-cluster links so separate subject islands don't yank into each other
+  return Math.min(1, baseStrength * 0.22);
+}
+
+function computeNodeCharge(node, baseRepel) {
+  const deg = node.degree || 1;
+  // High-degree subject hubs repel strongly to carve out dark channels between islands
+  const hubBoost = 1 + Math.min(3.8, Math.pow(Math.max(0, deg - 1), 0.58) * 0.46);
+  return -baseRepel * 44 * hubBoost;
+}
+
 export default function GraphView({
   vaultIndex,
   mode = 'global',
@@ -268,11 +312,10 @@ export default function GraphView({
   const nodesRef = useRef([]);
   const linksRef = useRef([]);
   const neighborMapRef = useRef(new Map());
-  const cameraRef = useRef({ x: 0, y: 0, k: 0.35 });
-  const overviewScaleRef = useRef(0.35);
+  const cameraRef = useRef({ x: 0, y: 0, k: 0.3 });
+  const overviewScaleRef = useRef(0.3);
   const hoveredNodeRef = useRef(null);
   const draggedNodeRef = useRef(null);
-  const labelCacheRef = useRef(new Map());
   const drawRef = useRef(() => {});
   const settingsRef = useRef(settings);
   const themeRef = useRef(themeColors);
@@ -282,17 +325,19 @@ export default function GraphView({
   themeRef.current = themeColors;
   activeNoteRef.current = activeNotePath;
 
-  // Obsidian-proportioned screen-space radius: crisp tiny leaves, distinct bold hubs
+  // Delicate uniform pinpoints for 1-3 link notes; distinct anchor circles for high-degree hubs
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
     const relZoom =
       mode === 'local'
         ? 1.05
-        : camK / Math.max(0.05, overviewScaleRef.current);
-    const zoomScale = Math.min(1.42, Math.max(0.78, 0.78 + Math.log2(Math.max(1, relZoom)) * 0.22));
-    if (node.unresolved) return 1.5 * mult * zoomScale;
-    const base = 1.45 + Math.pow(node.degree || 0, 0.56) * 0.62;
-    return Math.min(9.0, base) * mult * zoomScale;
+        : camK / Math.max(0.04, overviewScaleRef.current);
+    const zoomScale = Math.min(1.38, Math.max(0.76, 0.76 + Math.log2(Math.max(1, relZoom)) * 0.18));
+    if (node.unresolved) return 1.45 * mult * zoomScale;
+
+    const effectiveDeg = Math.max(0, (node.degree || 1) - 1);
+    const base = 1.72 + Math.pow(effectiveDeg, 0.72) * 0.34;
+    return Math.min(8.5, base) * mult * zoomScale;
   };
 
   const fitViewToNodes = () => {
@@ -318,12 +363,12 @@ export default function GraphView({
 
     if (!Number.isFinite(minX)) return;
 
-    const spanX = Math.max(200, maxX - minX);
-    const spanY = Math.max(200, maxY - minY);
-    const pad = mode === 'local' ? 0.68 : 0.84;
+    const spanX = Math.max(220, maxX - minX);
+    const spanY = Math.max(220, maxY - minY);
+    const pad = mode === 'local' ? 0.68 : 0.85;
     const k = Math.min(
-      mode === 'local' ? 1.35 : 1.05,
-      Math.max(0.05, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
+      mode === 'local' ? 1.35 : 1.0,
+      Math.max(0.04, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
     );
 
     if (mode === 'global') {
@@ -341,11 +386,10 @@ export default function GraphView({
     drawRef.current();
   };
 
-  // Global repulsion separates all hubs into islands; 6 link iterations keep spokes stiff & round
+  // Organic dandelion physics: single-pass springs, snug leaf tethers, strong hub island separation
   useEffect(() => {
     const nodes = graphData.nodes;
     const links = graphData.links;
-    labelCacheRef.current.clear();
 
     const prevPos = new Map(nodesRef.current.map((n) => [n.id, { x: n.x, y: n.y }]));
     for (const n of nodes) {
@@ -377,20 +421,23 @@ export default function GraphView({
         'link',
         forceLink(links)
           .id((d) => d.id)
-          .distance(settings.linkDistance * 0.72)
-          .strength(Math.min(1, settings.linkStrength * 1.1))
-          .iterations(6)
+          .distance((l) => computeLinkDistance(l, settings.linkDistance))
+          .strength((l) => computeLinkStrength(l, settings.linkStrength))
+          .iterations(1)
       )
-      .force('charge', forceManyBody().strength(-settings.repelStrength * 48))
-      .force('x', forceX(0).strength(settings.centerStrength * 0.11))
-      .force('y', forceY(0).strength(settings.centerStrength * 0.11))
+      .force(
+        'charge',
+        forceManyBody().strength((d) => computeNodeCharge(d, settings.repelStrength))
+      )
+      .force('x', forceX(0).strength(settings.centerStrength * 0.042))
+      .force('y', forceY(0).strength(settings.centerStrength * 0.042))
       .force(
         'collide',
-        forceCollide((d) => 11 + Math.sqrt(d.degree || 0) * 2.2)
+        forceCollide((d) => 7 + Math.sqrt(d.degree || 0) * 1.8)
       )
-      .alphaDecay(0.025);
+      .alphaDecay(0.022);
 
-    sim.tick(prevPos.size === 0 ? 180 : 45);
+    sim.tick(prevPos.size === 0 ? 220 : 50);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -412,18 +459,18 @@ export default function GraphView({
     const linkForce = sim.force('link');
     if (linkForce) {
       linkForce
-        .distance(settings.linkDistance * 0.72)
-        .strength(Math.min(1, settings.linkStrength * 1.1))
-        .iterations(6);
+        .distance((l) => computeLinkDistance(l, settings.linkDistance))
+        .strength((l) => computeLinkStrength(l, settings.linkStrength))
+        .iterations(1);
     }
     const chargeForce = sim.force('charge');
     if (chargeForce) {
-      chargeForce.strength(-settings.repelStrength * 48);
+      chargeForce.strength((d) => computeNodeCharge(d, settings.repelStrength));
     }
     const xForce = sim.force('x');
     const yForce = sim.force('y');
-    if (xForce) xForce.strength(settings.centerStrength * 0.11);
-    if (yForce) yForce.strength(settings.centerStrength * 0.11);
+    if (xForce) xForce.strength(settings.centerStrength * 0.042);
+    if (yForce) yForce.strength(settings.centerStrength * 0.042);
 
     sim.alpha(0.35).restart();
   }, [
@@ -479,7 +526,7 @@ export default function GraphView({
       const toScreenX = (wx) => wx * cam.k + cam.x;
       const toScreenY = (wy) => wy * cam.k + cam.y;
 
-      const screenLineWidth = Math.max(0.45, 0.65 * cfg.lineSizeMultiplier);
+      const screenLineWidth = Math.max(0.45, 0.62 * cfg.lineSizeMultiplier);
 
       // 1. Draw hairline edges
       for (const l of linksRef.current) {
@@ -508,7 +555,7 @@ export default function GraphView({
         if (hovered) {
           ctx.globalAlpha = isConnectedToHover ? 0.95 : 0.06;
         } else {
-          ctx.globalAlpha = l.unresolved ? 0.18 : 0.52;
+          ctx.globalAlpha = l.unresolved ? 0.16 : 0.48;
         }
         ctx.strokeStyle = isConnectedToHover ? colors.lineActive : colors.line;
         ctx.lineWidth = isConnectedToHover ? screenLineWidth * 1.65 : screenLineWidth;
@@ -541,7 +588,7 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 2. Draw nodes
+      // 2. Draw delicate pinpoint nodes & bold subject hubs
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
@@ -561,7 +608,7 @@ export default function GraphView({
         }
 
         ctx.beginPath();
-        ctx.arc(sx, sy, isHovered ? Math.max(r * 1.25, 4.5) : r, 0, Math.PI * 2);
+        ctx.arc(sx, sy, isHovered ? Math.max(r * 1.25, 4.4) : r, 0, Math.PI * 2);
         ctx.fillStyle = isHovered
           ? colors.accent
           : n.unresolved
@@ -577,17 +624,23 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 3. Relative-zoom label fade: 100% clean at overview, fades in cleanly around ~2x zoom
-      let baseLabelAlpha = 0.85;
+      // 3. Obsidian-accurate label emergence:
+      // Stays 0 across overview; only begins ghosting in at ~2.4x zoom (when ~3-4 clusters fill the screen)
+      let labelProgress = 0.85;
       if (mode === 'global') {
-        const relZoom = cam.k / Math.max(0.05, overviewScaleRef.current);
-        const fadeMetric = relZoom * Math.pow(2, cfg.textFadeMultiplier || 0);
-        baseLabelAlpha = Math.min(1, Math.max(0, (fadeMetric - 1.35) / 0.65));
+        const relZoom = cam.k / Math.max(0.04, overviewScaleRef.current);
+        const fadeStart = 1.95 * Math.pow(2, -(cfg.textFadeMultiplier || 0) * 0.65);
+        const rawT = (relZoom - fadeStart) / 1.45;
+        const clampedT = Math.min(1, Math.max(0, rawT));
+        // Quadratic ease-in so labels emerge as a whisper-faint ghost
+        labelProgress = clampedT * clampedT;
       }
+
+      const dynamicFontSize = (7.8 + labelProgress * 2.7).toFixed(1);
+      const wrapWidth = Math.round(118 + labelProgress * 34);
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.font = '500 10.5px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
 
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
@@ -600,28 +653,27 @@ export default function GraphView({
         const isHovered = hovered && hovered.id === n.id;
         const isActiveNote = activePath && n.id === activePath;
 
-        let alpha = baseLabelAlpha;
+        let alpha = labelProgress;
         if (isHovered || isActiveNote) {
           alpha = 1;
         } else if (hovered) {
-          alpha = baseLabelAlpha * 0.1;
+          alpha = labelProgress * 0.1;
         }
 
-        if (alpha <= 0.04) continue;
+        if (alpha <= 0.025) continue;
 
-        let lines = labelCacheRef.current.get(n.title);
-        if (!lines) {
-          lines = wrapLabelLines(ctx, n.title, 150, 2);
-          labelCacheRef.current.set(n.title, lines);
-        }
+        ctx.font = `500 ${isHovered ? '11.0' : dynamicFontSize}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
+        const lines = wrapLabelLines(ctx, n.title, isHovered ? 165 : wrapWidth, 2);
 
         const r = getScreenRadius(n, cam.k);
+        const lineHeight = isHovered ? 13.5 : Number(dynamicFontSize) * 1.24;
+
         ctx.save();
-        ctx.globalAlpha = isHovered ? 1 : alpha * 0.86;
+        ctx.globalAlpha = isHovered ? 1 : alpha * 0.82;
         ctx.fillStyle = colors.text;
-        const startY = sy + (isHovered ? Math.max(r * 1.25, 4.5) : r) + 5;
+        const startY = sy + (isHovered ? Math.max(r * 1.25, 4.4) : r) + 4.5;
         for (let i = 0; i < lines.length; i++) {
-          ctx.fillText(lines[i], sx, startY + i * 13);
+          ctx.fillText(lines[i], sx, startY + i * lineHeight);
         }
         ctx.restore();
       }
@@ -749,7 +801,7 @@ export default function GraphView({
           const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
           const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
           const cam = cameraRef.current;
-          const nextK = Math.min(8, Math.max(0.05, cam.k * (dist / lastPinchDist)));
+          const nextK = Math.min(8, Math.max(0.04, cam.k * (dist / lastPinchDist)));
           const ratio = nextK / cam.k;
           cam.x = midX - (midX - cam.x) * ratio;
           cam.y = midY - (midY - cam.y) * ratio;
@@ -865,7 +917,7 @@ export default function GraphView({
 
       const cam = cameraRef.current;
       const factor = Math.exp(-dy * 0.0018);
-      const nextK = Math.min(8, Math.max(0.05, cam.k * factor));
+      const nextK = Math.min(8, Math.max(0.04, cam.k * factor));
       const scaleRatio = nextK / cam.k;
 
       cam.x = sx - (sx - cam.x) * scaleRatio;
