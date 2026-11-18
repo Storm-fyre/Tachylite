@@ -64,11 +64,52 @@ function getThemeColors() {
     bg: get('--bg-primary', '#1e1e1e'),
     nodeDefault: get('--graph-node', '#9a9a9a'),
     nodeUnresolved: get('--graph-node-unresolved', '#4e4e4e'),
-    line: get('--graph-line', 'rgba(150, 150, 150, 0.26)'),
-    lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.85)'),
+    line: get('--graph-line', 'rgba(150, 150, 150, 0.24)'),
+    lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.9)'),
     accent: get('--text-accent', '#a88bfa'),
-    text: get('--graph-text', '#d4d4d4'),
+    text: get('--graph-text', '#cfcfcf'),
   };
+}
+
+function wrapLabelLines(ctx, text, maxWidth, maxLines = 2) {
+  if (!text) return [];
+  if (ctx.measureText(text).width <= maxWidth) return [text];
+
+  const words = text.split(/\s+/);
+  const lines = [];
+  let current = '';
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current) {
+        lines.push(current);
+        current = word;
+        if (lines.length === maxLines - 1) {
+          const remaining = [current, ...words.slice(i + 1)].join(' ');
+          let clipped = remaining;
+          while (clipped.length > 3 && ctx.measureText(`${clipped}...`).width > maxWidth) {
+            clipped = clipped.slice(0, -1);
+          }
+          lines.push(clipped.length < remaining.length ? `${clipped}...` : clipped);
+          return lines;
+        }
+      } else {
+        let clipped = word;
+        while (clipped.length > 3 && ctx.measureText(`${clipped}...`).width > maxWidth) {
+          clipped = clipped.slice(0, -1);
+        }
+        lines.push(`${clipped}...`);
+        return lines;
+      }
+    }
+  }
+
+  if (current) lines.push(current);
+  return lines.slice(0, maxLines);
 }
 
 export default function GraphView({
@@ -182,7 +223,6 @@ export default function GraphView({
       );
     }
 
-    // Recompute degrees within the filtered graph for accurate orphan filtering & sizing
     const degreeMap = new Map();
     for (const l of filteredLinks) {
       degreeMap.set(l.source, (degreeMap.get(l.source) || 0) + 1);
@@ -228,14 +268,14 @@ export default function GraphView({
     colorGroups,
   ]);
 
-  // Mutable simulation & camera state refs for smooth 60fps Canvas rendering
   const simRef = useRef(null);
   const nodesRef = useRef([]);
   const linksRef = useRef([]);
   const neighborMapRef = useRef(new Map());
-  const cameraRef = useRef({ x: 0, y: 0, k: 0.6 });
+  const cameraRef = useRef({ x: 0, y: 0, k: 0.4 });
   const hoveredNodeRef = useRef(null);
   const draggedNodeRef = useRef(null);
+  const labelCacheRef = useRef(new Map());
   const drawRef = useRef(() => {});
   const settingsRef = useRef(settings);
   const themeRef = useRef(themeColors);
@@ -245,11 +285,13 @@ export default function GraphView({
   themeRef.current = themeColors;
   activeNoteRef.current = activeNotePath;
 
-  const getNodeRadius = (node) => {
+  // Screen-space node radius: keeps apparent size crisp & delicate across all zoom levels
+  const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
-    if (node.unresolved) return 3 * mult;
-    const base = 3.2 + Math.sqrt(node.degree || 0) * 1.45;
-    return Math.min(16, base) * mult;
+    const zoomScale = Math.min(1.32, Math.max(0.78, Math.pow(Math.max(0.2, camK), 0.16)));
+    if (node.unresolved) return 2.4 * mult * zoomScale;
+    const base = 2.4 + Math.sqrt(node.degree || 0) * 0.62;
+    return Math.min(8.5, base) * mult * zoomScale;
   };
 
   const fitViewToNodes = () => {
@@ -275,12 +317,12 @@ export default function GraphView({
 
     if (!Number.isFinite(minX)) return;
 
-    const spanX = Math.max(120, maxX - minX);
-    const spanY = Math.max(120, maxY - minY);
-    const pad = mode === 'local' ? 0.68 : 0.82;
+    const spanX = Math.max(180, maxX - minX);
+    const spanY = Math.max(180, maxY - minY);
+    const pad = mode === 'local' ? 0.68 : 0.84;
     const k = Math.min(
-      mode === 'local' ? 1.5 : 1.2,
-      Math.max(0.12, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
+      mode === 'local' ? 1.35 : 1.1,
+      Math.max(0.08, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
     );
 
     const cx = (minX + maxX) / 2;
@@ -294,12 +336,12 @@ export default function GraphView({
     drawRef.current();
   };
 
-  // Initialize / update simulation when graphData changes
+  // Initialize / update force simulation when graphData changes
   useEffect(() => {
     const nodes = graphData.nodes;
     const links = graphData.links;
+    labelCacheRef.current.clear();
 
-    // Preserve previous positions if nodes already existed
     const prevPos = new Map(nodesRef.current.map((n) => [n.id, { x: n.x, y: n.y }]));
     for (const n of nodes) {
       const old = prevPos.get(n.id);
@@ -330,20 +372,19 @@ export default function GraphView({
         'link',
         forceLink(links)
           .id((d) => d.id)
-          .distance(settings.linkDistance * 0.65)
-          .strength(settings.linkStrength * 0.7)
+          .distance(settings.linkDistance * 1.15)
+          .strength(settings.linkStrength * 0.55)
       )
-      .force('charge', forceManyBody().strength(-settings.repelStrength * 28))
-      .force('x', forceX(0).strength(settings.centerStrength * 0.16))
-      .force('y', forceY(0).strength(settings.centerStrength * 0.16))
+      .force('charge', forceManyBody().strength(-settings.repelStrength * 52))
+      .force('x', forceX(0).strength(settings.centerStrength * 0.14))
+      .force('y', forceY(0).strength(settings.centerStrength * 0.14))
       .force(
         'collide',
-        forceCollide((d) => getNodeRadius(d) + 3.5)
+        forceCollide((d) => 12 + Math.sqrt(d.degree || 0) * 2.5)
       )
       .alphaDecay(0.028);
 
-    // Pre-settle slightly so graph opens neatly arranged
-    sim.tick(prevPos.size === 0 ? 110 : 35);
+    sim.tick(prevPos.size === 0 ? 140 : 40);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -357,7 +398,7 @@ export default function GraphView({
     };
   }, [graphData]);
 
-  // Live-update physics parameters without recreating the simulation
+  // Live-update physics parameters
   useEffect(() => {
     const sim = simRef.current;
     if (!sim) return;
@@ -365,17 +406,17 @@ export default function GraphView({
     const linkForce = sim.force('link');
     if (linkForce) {
       linkForce
-        .distance(settings.linkDistance * 0.65)
-        .strength(settings.linkStrength * 0.7);
+        .distance(settings.linkDistance * 1.15)
+        .strength(settings.linkStrength * 0.55);
     }
     const chargeForce = sim.force('charge');
     if (chargeForce) {
-      chargeForce.strength(-settings.repelStrength * 28);
+      chargeForce.strength(-settings.repelStrength * 52);
     }
     const xForce = sim.force('x');
     const yForce = sim.force('y');
-    if (xForce) xForce.strength(settings.centerStrength * 0.16);
-    if (yForce) yForce.strength(settings.centerStrength * 0.16);
+    if (xForce) xForce.strength(settings.centerStrength * 0.14);
+    if (yForce) yForce.strength(settings.centerStrength * 0.14);
 
     sim.alpha(0.35).restart();
   }, [
@@ -385,7 +426,7 @@ export default function GraphView({
     settings.centerStrength,
   ]);
 
-  // Redraw when visual-only settings or theme change
+  // Redraw when visual settings or theme change
   useEffect(() => {
     drawRef.current();
   }, [
@@ -397,7 +438,7 @@ export default function GraphView({
     activeNotePath,
   ]);
 
-  // Canvas draw loop + ResizeObserver + pointer/wheel interactions
+  // Screen-space Canvas renderer + smooth zoom/pan/pinch/drag
   useEffect(() => {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
@@ -429,40 +470,55 @@ export default function GraphView({
       ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, rect.width, rect.height);
 
-      ctx.translate(cam.x, cam.y);
-      ctx.scale(cam.k, cam.k);
+      const toScreenX = (wx) => wx * cam.k + cam.x;
+      const toScreenY = (wy) => wy * cam.k + cam.y;
 
-      const baseLineWidth = (0.85 * cfg.lineSizeMultiplier) / Math.max(0.35, Math.sqrt(cam.k));
+      const screenLineWidth = Math.max(0.55, 0.85 * cfg.lineSizeMultiplier);
 
-      // Draw edges
+      // 1. Draw edges in screen space (crisp hairlines at every zoom)
       for (const l of linksRef.current) {
         const s = l.source;
         const t = l.target;
         if (typeof s !== 'object' || typeof t !== 'object') continue;
+
+        const sx = toScreenX(s.x);
+        const sy = toScreenY(s.y);
+        const tx = toScreenX(t.x);
+        const ty = toScreenY(t.y);
+
+        // Quick viewport cull
+        if (
+          (sx < -50 && tx < -50) ||
+          (sx > rect.width + 50 && tx > rect.width + 50) ||
+          (sy < -50 && ty < -50) ||
+          (sy > rect.height + 50 && ty > rect.height + 50)
+        ) {
+          continue;
+        }
 
         const isConnectedToHover =
           hovered && (s.id === hovered.id || t.id === hovered.id);
 
         ctx.save();
         if (hovered) {
-          ctx.globalAlpha = isConnectedToHover ? 0.9 : 0.08;
+          ctx.globalAlpha = isConnectedToHover ? 0.92 : 0.08;
         } else {
-          ctx.globalAlpha = l.unresolved ? 0.25 : 0.7;
+          ctx.globalAlpha = l.unresolved ? 0.22 : 0.72;
         }
         ctx.strokeStyle = isConnectedToHover ? colors.lineActive : colors.line;
-        ctx.lineWidth = isConnectedToHover ? baseLineWidth * 1.65 : baseLineWidth;
+        ctx.lineWidth = isConnectedToHover ? screenLineWidth * 1.65 : screenLineWidth;
 
         ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(t.x, t.y);
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(tx, ty);
         ctx.stroke();
 
         if (cfg.showArrow) {
-          const angle = Math.atan2(t.y - s.y, t.x - s.x);
-          const tr = getNodeRadius(t) + 2;
-          const ax = t.x - Math.cos(angle) * tr;
-          const ay = t.y - Math.sin(angle) * tr;
-          const arrowLen = 6 / Math.max(0.4, Math.sqrt(cam.k));
+          const angle = Math.atan2(ty - sy, tx - sx);
+          const tr = getScreenRadius(t, cam.k) + 2;
+          const ax = tx - Math.cos(angle) * tr;
+          const ay = ty - Math.sin(angle) * tr;
+          const arrowLen = 6;
           ctx.beginPath();
           ctx.moveTo(ax, ay);
           ctx.lineTo(
@@ -480,10 +536,16 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // Draw nodes
+      // 2. Draw nodes in screen space
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
-        const r = getNodeRadius(n);
+        const sx = toScreenX(n.x);
+        const sy = toScreenY(n.y);
+        if (sx < -30 || sx > rect.width + 30 || sy < -30 || sy > rect.height + 30) {
+          continue;
+        }
+
+        const r = getScreenRadius(n, cam.k);
         const isHovered = hovered && hovered.id === n.id;
         const isNeighbor = hovered && hoveredNeighbors?.has(n.id);
         const isActiveNote = activePath && n.id === activePath;
@@ -494,49 +556,65 @@ export default function GraphView({
         }
 
         ctx.beginPath();
-        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = n.unresolved
-          ? colors.nodeUnresolved
-          : n.groupColor || colors.nodeDefault;
+        ctx.arc(sx, sy, isHovered ? r * 1.15 : r, 0, Math.PI * 2);
+        ctx.fillStyle = isHovered
+          ? colors.accent
+          : n.unresolved
+            ? colors.nodeUnresolved
+            : n.groupColor || colors.nodeDefault;
         ctx.fill();
 
-        if (isHovered || isActiveNote) {
-          ctx.lineWidth = 2 / Math.max(0.4, Math.sqrt(cam.k));
+        if (isActiveNote && !isHovered) {
+          ctx.lineWidth = 1.6;
           ctx.strokeStyle = colors.accent;
           ctx.stroke();
         }
         ctx.restore();
       }
 
-      // Draw node labels with Obsidian zoom-fade behavior
-      const fadeThreshold = cam.k * Math.pow(2, cfg.textFadeMultiplier || 0);
-      const baseAlpha = Math.min(1, Math.max(0, (fadeThreshold - 0.35) / 0.45));
+      // 3. Draw screen-space wrapped labels (matching Obsidian fade & hover behavior)
+      const fadeMetric = cam.k * Math.pow(2, cfg.textFadeMultiplier || 0);
+      const baseLabelAlpha = Math.min(1, Math.max(0, (fadeMetric - 0.55) / 0.42));
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      const fontSize = Math.max(9.5, 11.5 / Math.pow(cam.k, 0.72));
-      ctx.font = `500 ${fontSize}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
+      ctx.font = '500 10.5px Inter, -apple-system, BlinkMacSystemFont, sans-serif';
 
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
+        const sx = toScreenX(n.x);
+        const sy = toScreenY(n.y);
+        if (sx < -120 || sx > rect.width + 120 || sy < -60 || sy > rect.height + 60) {
+          continue;
+        }
+
         const isHovered = hovered && hovered.id === n.id;
-        const isNeighbor = hovered && hoveredNeighbors?.has(n.id);
         const isActiveNote = activePath && n.id === activePath;
 
-        let alpha = baseAlpha;
-        if (isHovered || isNeighbor || isActiveNote) {
+        // When hovering, ONLY the hovered node itself forces its label bright (not all neighbors)
+        let alpha = baseLabelAlpha;
+        if (isHovered || isActiveNote) {
           alpha = 1;
         } else if (hovered) {
-          alpha = Math.min(alpha, 0.12);
+          alpha = baseLabelAlpha * 0.12;
         }
 
         if (alpha <= 0.04) continue;
 
+        let lines = labelCacheRef.current.get(n.title);
+        if (!lines) {
+          lines = wrapLabelLines(ctx, n.title, 150, 2);
+          labelCacheRef.current.set(n.title, lines);
+        }
+
+        const r = getScreenRadius(n, cam.k);
         ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = isHovered ? colors.accent : colors.text;
-        const r = getNodeRadius(n);
-        ctx.fillText(n.title, n.x, n.y + r + 3.5 / Math.max(0.4, cam.k));
+        ctx.globalAlpha = isHovered ? 1 : alpha * 0.88;
+        ctx.fillStyle = isHovered ? colors.text : colors.text;
+        const startY = sy + r + 5;
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], sx, startY + i * 13);
+        }
         ctx.restore();
       }
 
@@ -549,41 +627,46 @@ export default function GraphView({
     const resizeObs = new ResizeObserver(() => draw());
     resizeObs.observe(wrap);
 
-    // Coordinate helpers
-    const toWorld = (clientX, clientY) => {
+    const hitTestNode = (clientX, clientY) => {
       const rect = canvas.getBoundingClientRect();
+      const px = clientX - rect.left;
+      const py = clientY - rect.top;
       const cam = cameraRef.current;
-      return {
-        sx: clientX - rect.left,
-        sy: clientY - rect.top,
-        wx: (clientX - rect.left - cam.x) / cam.k,
-        wy: (clientY - rect.top - cam.y) / cam.k,
-      };
-    };
 
-    const hitTestNode = (wx, wy) => {
-      const hitPad = 4 / Math.max(0.35, cameraRef.current.k);
       for (let i = nodesRef.current.length - 1; i >= 0; i--) {
         const n = nodesRef.current[i];
-        const dx = wx - n.x;
-        const dy = wy - n.y;
-        const r = getNodeRadius(n) + hitPad;
+        const sx = n.x * cam.k + cam.x;
+        const sy = n.y * cam.k + cam.y;
+        const r = getScreenRadius(n, cam.k) + 5;
+        const dx = px - sx;
+        const dy = py - sy;
         if (dx * dx + dy * dy <= r * r) return n;
       }
       return null;
     };
 
+    const activePointers = new Map();
     let isPanning = false;
     let startClient = { x: 0, y: 0 };
     let startCam = { x: 0, y: 0 };
     let movedDist = 0;
+    let lastPinchDist = null;
 
     const onPointerDown = (e) => {
-      if (e.button !== 0 && e.button !== 1) return;
+      if (e.button !== 0 && e.button !== 1 && e.pointerType === 'mouse') return;
       canvas.setPointerCapture(e.pointerId);
-      const { wx, wy } = toWorld(e.clientX, e.clientY);
-      const hit = hitTestNode(wx, wy);
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+      // Two-finger touch pinch start
+      if (activePointers.size === 2) {
+        draggedNodeRef.current = null;
+        isPanning = false;
+        const pts = [...activePointers.values()];
+        lastPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        return;
+      }
+
+      const hit = hitTestNode(e.clientX, e.clientY);
       startClient = { x: e.clientX, y: e.clientY };
       startCam = { x: cameraRef.current.x, y: cameraRef.current.y };
       movedDist = 0;
@@ -599,12 +682,36 @@ export default function GraphView({
     };
 
     const onPointerMove = (e) => {
-      const { wx, wy } = toWorld(e.clientX, e.clientY);
+      if (activePointers.has(e.pointerId)) {
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      // Two-finger touch pinch zoom
+      if (activePointers.size === 2) {
+        const pts = [...activePointers.values()];
+        const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        if (lastPinchDist && dist > 0) {
+          const rect = canvas.getBoundingClientRect();
+          const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
+          const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
+          const cam = cameraRef.current;
+          const nextK = Math.min(8, Math.max(0.05, cam.k * (dist / lastPinchDist)));
+          const ratio = nextK / cam.k;
+          cam.x = midX - (midX - cam.x) * ratio;
+          cam.y = midY - (midY - cam.y) * ratio;
+          cam.k = nextK;
+          draw();
+        }
+        lastPinchDist = dist;
+        return;
+      }
 
       if (draggedNodeRef.current) {
+        const rect = canvas.getBoundingClientRect();
+        const cam = cameraRef.current;
         movedDist = Math.hypot(e.clientX - startClient.x, e.clientY - startClient.y);
-        draggedNodeRef.current.fx = wx;
-        draggedNodeRef.current.fy = wy;
+        draggedNodeRef.current.fx = (e.clientX - rect.left - cam.x) / cam.k;
+        draggedNodeRef.current.fy = (e.clientY - rect.top - cam.y) / cam.k;
         draw();
         return;
       }
@@ -619,7 +726,7 @@ export default function GraphView({
         return;
       }
 
-      const hit = hitTestNode(wx, wy);
+      const hit = hitTestNode(e.clientX, e.clientY);
       if (hit !== hoveredNodeRef.current) {
         hoveredNodeRef.current = hit;
         canvas.style.cursor = hit && !hit.unresolved ? 'pointer' : 'grab';
@@ -628,6 +735,9 @@ export default function GraphView({
     };
 
     const onPointerUp = (e) => {
+      activePointers.delete(e.pointerId);
+      if (activePointers.size < 2) lastPinchDist = null;
+
       try {
         canvas.releasePointerCapture(e.pointerId);
       } catch {
@@ -648,12 +758,21 @@ export default function GraphView({
       isPanning = false;
     };
 
+    // Delta-proportional exponential zoom: smooth on trackpads, snappy on mouse wheel
     const onWheel = (e) => {
       e.preventDefault();
-      const { sx, sy } = toWorld(e.clientX, e.clientY);
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 28;
+      else if (e.deltaMode === 2) dy *= 240;
+      dy = Math.max(-180, Math.min(180, dy));
+
       const cam = cameraRef.current;
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      const nextK = Math.min(6, Math.max(0.06, cam.k * factor));
+      const factor = Math.exp(-dy * 0.0018);
+      const nextK = Math.min(8, Math.max(0.05, cam.k * factor));
       const scaleRatio = nextK / cam.k;
 
       cam.x = sx - (sx - cam.x) * scaleRatio;
