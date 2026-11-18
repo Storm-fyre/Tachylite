@@ -363,24 +363,32 @@ export default function GraphView({
 
     if (simRef.current) simRef.current.stop();
 
+const maxRepelDist = Math.max(220, settings.linkDistance * 1.85);
+
     const sim = forceSimulation(nodes)
       .force(
         'link',
         forceLink(links)
           .id((d) => d.id)
-          .distance(settings.linkDistance * 0.85)
-          .strength(settings.linkStrength * 0.65)
+          .distance(settings.linkDistance * 0.55)
+          .strength(Math.min(1, settings.linkStrength * 0.95))
+          .iterations(4)
       )
-      .force('charge', forceManyBody().strength(-settings.repelStrength * 65))
-      .force('x', forceX(0).strength(settings.centerStrength * 0.045))
-      .force('y', forceY(0).strength(settings.centerStrength * 0.045))
+      .force(
+        'charge',
+        forceManyBody()
+          .strength(-settings.repelStrength * 42)
+          .distanceMax(maxRepelDist)
+      )
+      .force('x', forceX(0).strength(settings.centerStrength * 0.08))
+      .force('y', forceY(0).strength(settings.centerStrength * 0.08))
       .force(
         'collide',
-        forceCollide((d) => 9 + Math.sqrt(d.degree || 0) * 2.0)
+        forceCollide((d) => 10 + Math.sqrt(d.degree || 0) * 1.5)
       )
-      .alphaDecay(0.026);
+      .alphaDecay(0.025);
 
-    sim.tick(prevPos.size === 0 ? 160 : 45);
+    sim.tick(prevPos.size === 0 ? 200 : 50);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -402,17 +410,20 @@ export default function GraphView({
     const linkForce = sim.force('link');
     if (linkForce) {
       linkForce
-        .distance(settings.linkDistance * 0.85)
-        .strength(settings.linkStrength * 0.65);
+        .distance(settings.linkDistance * 0.55)
+        .strength(Math.min(1, settings.linkStrength * 0.95))
+        .iterations(4);
     }
     const chargeForce = sim.force('charge');
     if (chargeForce) {
-      chargeForce.strength(-settings.repelStrength * 65);
+      chargeForce
+        .strength(-settings.repelStrength * 42)
+        .distanceMax(Math.max(220, settings.linkDistance * 1.85));
     }
     const xForce = sim.force('x');
     const yForce = sim.force('y');
-    if (xForce) xForce.strength(settings.centerStrength * 0.045);
-    if (yForce) yForce.strength(settings.centerStrength * 0.045);
+    if (xForce) xForce.strength(settings.centerStrength * 0.08);
+    if (yForce) yForce.strength(settings.centerStrength * 0.08);
 
     sim.alpha(0.35).restart();
   }, [
