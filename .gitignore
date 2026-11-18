@@ -1,0 +1,7 @@
+node_modules
+dist
+public/vault-data
+.DS_Store
+Thumbs.db
+**/.obsidian/workspace.json
+**/.obsidian/workspace-mobile.json
