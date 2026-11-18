@@ -67,11 +67,11 @@ function getThemeColors() {
     line: get('--graph-line', 'rgba(150, 150, 150, 0.24)'),
     lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.9)'),
     accent: get('--text-accent', '#a88bfa'),
-    text: get('--graph-text', '#cfcfcf'),
+    text: get('--graph-text', '#c8c8c8'),
   };
 }
 
-function wrapLabelLines(ctx, text, maxWidth, maxLines = 2) {
+function wrapLabelLines(ctx, text, maxWidth, maxLines = 4) {
   if (!text) return [];
   if (ctx.measureText(text).width <= maxWidth) return [text];
 
@@ -90,20 +90,12 @@ function wrapLabelLines(ctx, text, maxWidth, maxLines = 2) {
         current = word;
         if (lines.length === maxLines - 1) {
           const remaining = [current, ...words.slice(i + 1)].join(' ');
-          let clipped = remaining;
-          while (clipped.length > 3 && ctx.measureText(`${clipped}...`).width > maxWidth) {
-            clipped = clipped.slice(0, -1);
-          }
-          lines.push(clipped.length < remaining.length ? `${clipped}...` : clipped);
+          lines.push(remaining);
           return lines;
         }
       } else {
-        let clipped = word;
-        while (clipped.length > 3 && ctx.measureText(`${clipped}...`).width > maxWidth) {
-          clipped = clipped.slice(0, -1);
-        }
-        lines.push(`${clipped}...`);
-        return lines;
+        lines.push(word);
+        current = '';
       }
     }
   }
@@ -118,17 +110,17 @@ function computeLinkDistance(link, baseDistance) {
   const minDeg = Math.min(sDeg, tDeg);
   const maxDeg = Math.max(sDeg, tDeg);
 
-  // 1-connection summary/leaf attached to a chapter note: keep snug & tucked close
-  if (minDeg <= 1 && maxDeg <= 5) {
-    return baseDistance * 0.36;
+  // Chapter -> Summary (leaf) link: full spoke length so summary sits clearly outward from chapter
+  if (minDeg <= 1) {
+    return baseDistance * 0.92;
   }
-  // Hub-to-chapter spokes: moderate distance with slight natural stagger
+  // Hub -> Chapter spoke: full spoke length with slight organic depth stagger
   if (maxDeg >= 8 && minDeg <= 4) {
-    const jitter = ((sDeg * 7 + tDeg * 13) % 5) * 0.04;
-    return baseDistance * (0.68 + jitter);
+    const stagger = ((sDeg * 11 + tDeg * 17) % 5) * 0.04;
+    return baseDistance * (0.9 + stagger);
   }
-  // Cross-cluster or hub-to-hub bridges: allow wider separation between islands
-  return baseDistance * 1.25;
+  // Cross-cluster bridge between different subjects: wide separation
+  return baseDistance * 1.45;
 }
 
 function computeLinkStrength(link, baseStrength) {
@@ -137,23 +129,35 @@ function computeLinkStrength(link, baseStrength) {
   const minDeg = Math.min(sDeg, tDeg);
   const maxDeg = Math.max(sDeg, tDeg);
 
-  // Snug tether for leaf/summary notes
+  // Leaf summary tether: holds its full spoke distance cleanly
   if (minDeg <= 1) {
-    return Math.min(1, baseStrength * 0.88);
+    return Math.min(1, baseStrength * 0.72);
   }
-  // Hub-to-chapter spoke
+  // Hub -> Chapter spoke
   if (maxDeg >= 8 && minDeg <= 4) {
-    return Math.min(1, baseStrength * 0.58);
+    return Math.min(1, baseStrength * 0.52);
   }
-  // Soften cross-cluster links so separate subject islands don't yank into each other
-  return Math.min(1, baseStrength * 0.22);
+  // Cross-cluster links between two subjects (e.g. Polity <-> Governance):
+  // keep very gentle so two yellow hubs never pull together and tangle their children
+  return Math.min(1, baseStrength * 0.12);
 }
 
 function computeNodeCharge(node, baseRepel) {
   const deg = node.degree || 1;
-  // High-degree subject hubs repel strongly to carve out dark channels between islands
-  const hubBoost = 1 + Math.min(3.8, Math.pow(Math.max(0, deg - 1), 0.58) * 0.46);
-  return -baseRepel * 44 * hubBoost;
+  // Strong uniform repulsion across all nodes so sibling spokes fan out at equal angles,
+  // plus extra territorial repulsion on major Subject Hubs
+  const hubBoost = deg >= 10 ? 1.85 : 1 + Math.min(0.45, (deg - 1) * 0.08);
+  return -baseRepel * 68 * hubBoost;
+}
+
+function computeCollideRadius(node) {
+  const deg = node.degree || 1;
+  // Subject hubs maintain a wide personal territory so two hubs never sit 35px apart
+  if (deg >= 12) {
+    return 95 + Math.sqrt(deg) * 10;
+  }
+  // Every regular note maintains at least 42 world units of personal radius (84 units center-to-center)
+  return 42 + Math.sqrt(deg) * 3;
 }
 
 export default function GraphView({
@@ -312,8 +316,8 @@ export default function GraphView({
   const nodesRef = useRef([]);
   const linksRef = useRef([]);
   const neighborMapRef = useRef(new Map());
-  const cameraRef = useRef({ x: 0, y: 0, k: 0.3 });
-  const overviewScaleRef = useRef(0.3);
+  const cameraRef = useRef({ x: 0, y: 0, k: 0.22 });
+  const overviewScaleRef = useRef(0.22);
   const hoveredNodeRef = useRef(null);
   const draggedNodeRef = useRef(null);
   const drawRef = useRef(() => {});
@@ -325,19 +329,19 @@ export default function GraphView({
   themeRef.current = themeColors;
   activeNoteRef.current = activeNotePath;
 
-  // Delicate uniform pinpoints for 1-3 link notes; distinct anchor circles for high-degree hubs
+  // Delicate uniform pinpoints for regular notes (1-3 links); distinct bold circles for Subject Hubs
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
     const relZoom =
       mode === 'local'
         ? 1.05
         : camK / Math.max(0.04, overviewScaleRef.current);
-    const zoomScale = Math.min(1.38, Math.max(0.76, 0.76 + Math.log2(Math.max(1, relZoom)) * 0.18));
+    const zoomScale = Math.min(1.28, Math.max(0.76, 0.76 + Math.log2(Math.max(1, relZoom)) * 0.14));
     if (node.unresolved) return 1.45 * mult * zoomScale;
 
     const effectiveDeg = Math.max(0, (node.degree || 1) - 1);
-    const base = 1.72 + Math.pow(effectiveDeg, 0.72) * 0.34;
-    return Math.min(8.5, base) * mult * zoomScale;
+    const base = 1.7 + Math.pow(effectiveDeg, 0.72) * 0.34;
+    return Math.min(8.2, base) * mult * zoomScale;
   };
 
   const fitViewToNodes = () => {
@@ -363,8 +367,8 @@ export default function GraphView({
 
     if (!Number.isFinite(minX)) return;
 
-    const spanX = Math.max(220, maxX - minX);
-    const spanY = Math.max(220, maxY - minY);
+    const spanX = Math.max(240, maxX - minX);
+    const spanY = Math.max(240, maxY - minY);
     const pad = mode === 'local' ? 0.68 : 0.85;
     const k = Math.min(
       mode === 'local' ? 1.35 : 1.0,
@@ -386,7 +390,7 @@ export default function GraphView({
     drawRef.current();
   };
 
-  // Organic dandelion physics: single-pass springs, snug leaf tethers, strong hub island separation
+  // Initialize force simulation with full spoke lengths, uniform sibling repulsion & hub territory buffers
   useEffect(() => {
     const nodes = graphData.nodes;
     const links = graphData.links;
@@ -429,15 +433,15 @@ export default function GraphView({
         'charge',
         forceManyBody().strength((d) => computeNodeCharge(d, settings.repelStrength))
       )
-      .force('x', forceX(0).strength(settings.centerStrength * 0.042))
-      .force('y', forceY(0).strength(settings.centerStrength * 0.042))
+      .force('x', forceX(0).strength(settings.centerStrength * 0.038))
+      .force('y', forceY(0).strength(settings.centerStrength * 0.038))
       .force(
         'collide',
-        forceCollide((d) => 7 + Math.sqrt(d.degree || 0) * 1.8)
+        forceCollide((d) => computeCollideRadius(d)).iterations(2)
       )
-      .alphaDecay(0.022);
+      .alphaDecay(0.02);
 
-    sim.tick(prevPos.size === 0 ? 220 : 50);
+    sim.tick(prevPos.size === 0 ? 260 : 60);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -469,8 +473,8 @@ export default function GraphView({
     }
     const xForce = sim.force('x');
     const yForce = sim.force('y');
-    if (xForce) xForce.strength(settings.centerStrength * 0.042);
-    if (yForce) yForce.strength(settings.centerStrength * 0.042);
+    if (xForce) xForce.strength(settings.centerStrength * 0.038);
+    if (yForce) yForce.strength(settings.centerStrength * 0.038);
 
     sim.alpha(0.35).restart();
   }, [
@@ -624,20 +628,20 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 3. Obsidian-accurate label emergence:
-      // Stays 0 across overview; only begins ghosting in at ~2.4x zoom (when ~3-4 clusters fill the screen)
+      // 3. Screen-pixel distance label gate:
+      // Labels stay 100% off until a link spans ~66+ pixels on screen (when ~20-25 nodes are in view)
       let labelProgress = 0.85;
       if (mode === 'global') {
-        const relZoom = cam.k / Math.max(0.04, overviewScaleRef.current);
-        const fadeStart = 1.95 * Math.pow(2, -(cfg.textFadeMultiplier || 0) * 0.65);
-        const rawT = (relZoom - fadeStart) / 1.45;
+        const screenLinkPx = (cfg.linkDistance || 160) * cam.k;
+        const startPx = 56 * Math.pow(2, -(cfg.textFadeMultiplier || 0) * 0.45);
+        const rawT = (screenLinkPx - startPx) / 38;
         const clampedT = Math.min(1, Math.max(0, rawT));
-        // Quadratic ease-in so labels emerge as a whisper-faint ghost
         labelProgress = clampedT * clampedT;
       }
 
-      const dynamicFontSize = (7.8 + labelProgress * 2.7).toFixed(1);
-      const wrapWidth = Math.round(118 + labelProgress * 34);
+      // Fine ~7.5px - 8.4px regular (400) font & compact ~95px 3-line wrap block matching Obsidian
+      const dynamicFontSize = (7.4 + labelProgress * 1.0).toFixed(1);
+      const wrapWidth = Math.round(88 + labelProgress * 10);
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
@@ -646,7 +650,7 @@ export default function GraphView({
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
         const sy = toScreenY(n.y);
-        if (sx < -120 || sx > rect.width + 120 || sy < -60 || sy > rect.height + 60) {
+        if (sx < -100 || sx > rect.width + 100 || sy < -50 || sy > rect.height + 50) {
           continue;
         }
 
@@ -662,16 +666,16 @@ export default function GraphView({
 
         if (alpha <= 0.025) continue;
 
-        ctx.font = `500 ${isHovered ? '11.0' : dynamicFontSize}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
-        const lines = wrapLabelLines(ctx, n.title, isHovered ? 165 : wrapWidth, 2);
+        ctx.font = `${isHovered ? '500 10.2' : `400 ${dynamicFontSize}`}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
+        const lines = wrapLabelLines(ctx, n.title, isHovered ? 135 : wrapWidth, 3);
 
         const r = getScreenRadius(n, cam.k);
-        const lineHeight = isHovered ? 13.5 : Number(dynamicFontSize) * 1.24;
+        const lineHeight = isHovered ? 12.5 : Number(dynamicFontSize) * 1.22;
 
         ctx.save();
         ctx.globalAlpha = isHovered ? 1 : alpha * 0.82;
         ctx.fillStyle = colors.text;
-        const startY = sy + (isHovered ? Math.max(r * 1.25, 4.4) : r) + 4.5;
+        const startY = sy + (isHovered ? Math.max(r * 1.25, 4.4) : r) + 4;
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i], sx, startY + i * lineHeight);
         }
@@ -801,7 +805,7 @@ export default function GraphView({
           const midX = (pts[0].x + pts[1].x) / 2 - rect.left;
           const midY = (pts[0].y + pts[1].y) / 2 - rect.top;
           const cam = cameraRef.current;
-          const nextK = Math.min(8, Math.max(0.04, cam.k * (dist / lastPinchDist)));
+          const nextK = Math.min(8, Math.max(0.03, cam.k * (dist / lastPinchDist)));
           const ratio = nextK / cam.k;
           cam.x = midX - (midX - cam.x) * ratio;
           cam.y = midY - (midY - cam.y) * ratio;
@@ -917,7 +921,7 @@ export default function GraphView({
 
       const cam = cameraRef.current;
       const factor = Math.exp(-dy * 0.0018);
-      const nextK = Math.min(8, Math.max(0.04, cam.k * factor));
+      const nextK = Math.min(8, Math.max(0.03, cam.k * factor));
       const scaleRatio = nextK / cam.k;
 
       cam.x = sx - (sx - cam.x) * scaleRatio;
