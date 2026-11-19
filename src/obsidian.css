@@ -560,6 +560,7 @@ body,
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 20px 36px 90px;
 }
 
@@ -572,8 +573,34 @@ body,
   color: var(--text-normal);
 }
 
+/* Smart Readable Line Length:
+   Prose stays centered at --reader-max-width (740px), while wide ASCII/code blocks (<pre>)
+   and wide tables (<table>) expand symmetrically into the open horizontal pane margins. */
 .obs-reader-container.is-readable-width {
+  max-width: 100%;
+}
+
+.obs-reader-container.is-readable-width > :not(.obs-markdown),
+.obs-reader-container.is-readable-width > .obs-markdown > :not(pre):not(table) {
   max-width: var(--reader-max-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.obs-reader-container.is-readable-width > .obs-markdown > pre {
+  width: fit-content;
+  min-width: min(100%, var(--reader-max-width));
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.obs-reader-container.is-readable-width > .obs-markdown > table {
+  width: auto;
+  min-width: min(100%, var(--reader-max-width));
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .obs-note-title {
@@ -761,7 +788,7 @@ body,
   background: var(--bg-secondary-alt);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  padding: 12px 14px;
+  padding: 14px 18px;
   overflow-x: auto;
   margin: 1em 0;
 }
@@ -771,6 +798,7 @@ body,
   padding: 0;
   font-size: 0.85em;
   line-height: 1.5;
+  white-space: pre;
 }
 
 .obs-markdown table {
@@ -1334,16 +1362,13 @@ body,
     right: 0;
   }
 
-  .obs-mobile-backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 45;
-  }
-
   .obs-reader-scroll {
     padding: 16px 18px 72px;
+  }
+
+  .obs-reader-container.is-readable-width > .obs-markdown > table {
+    display: block;
+    overflow-x: auto;
   }
 
   .obs-hover-preview {
