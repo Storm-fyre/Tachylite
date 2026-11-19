@@ -60,18 +60,258 @@ function matchesGraphQuery(node, query) {
 function getThemeColors() {
   const styles = getComputedStyle(document.documentElement);
   const get = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   return {
+    isLight,
     bg: get('--bg-primary', '#1e1e1e'),
     nodeDefault: get('--graph-node', '#9a9a9a'),
     nodeUnresolved: get('--graph-node-unresolved', '#4e4e4e'),
-    line: get('--graph-line', 'rgba(150, 150, 150, 0.24)'),
-    lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.9)'),
+    line: get(
+      '--graph-line',
+      isLight ? 'rgba(110, 110, 110, 0.24)' : 'rgba(165, 165, 165, 0.26)'
+    ),
+    lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.92)'),
     accent: get('--text-accent', '#a88bfa'),
-    text: get('--graph-text', '#c8c8c8'),
+    text: get('--graph-text', isLight ? '#333333' : '#d2d2d2'),
   };
 }
 
-function wrapLabelLines(ctx, text, maxWidth, maxLines = 4) {
+function getNodeRole(node) {
+  if (node.unresolved) return 'unresolved';
+  const tags = (node.tags || []).map((t) => t.toLowerCase());
+  const folder = (node.folder || '').toLowerCase();
+  const deg = node.degree || 0;
+
+  if (tags.includes('subject-hub') || deg >= 16) return 'hub';
+  if (folder === 'trivia' || folder.startsWith('trivia/') || folder === 'good to know') {
+    return 'trivia';
+  }
+  if (deg <= 1 || folder.startsWith('how stuff works summary')) return 'summary';
+  return 'chapter';
+}
+
+function classifyLink(link) {
+  const s = typeof link.source === 'object' ? link.source : null;
+  const t = typeof link.target === 'object' ? link.target : null;
+  if (!s || !t) return 'cross';
+
+  const rA = s.role || 'chapter';
+  const rB = t.role || 'chapter';
+  const sameFolder = Boolean(s.folder && t.folder && s.folder === t.folder);
+
+  // Leaf summary tether (Mother Chapter <-> Summary Dendrite)
+  if (rA === 'summary' || rB === 'summary') return 'summary';
+  // Hub-to-hub outer constellation loop
+  if (rA === 'hub' && rB === 'hub') return 'hub-loop';
+  // Subject Hub <-> Chapter in its own constellation
+  if ((rA === 'hub' || rB === 'hub') && sameFolder) return 'hub-spoke';
+  // Sequential chapters within the same subject folder
+  if (rA === 'chapter' && rB === 'chapter' && sameFolder) return 'sibling';
+  // Trivia bridge connections
+  if (rA === 'trivia' || rB === 'trivia') return 'trivia';
+  // Cross-subject synapses between two different folders
+  return 'cross';
+}
+
+function hashString(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967295;
+}
+
+function computeLinkDistance(link, baseDistance, isLocal) {
+  if (isLocal) return baseDistance * 0.52;
+  const kind = classifyLink(link);
+  const s = link.source;
+  const t = link.target;
+  const jitter = (hashString(`${s.id}|${t.id}`) - 0.5) * 0.1;
+
+  switch (kind) {
+    case 'summary':
+      // Crisp outward halo around each Mother Chapter
+      return baseDistance * (0.42 + jitter * 0.5);
+    case 'sibling':
+      // Smooth sequential arc around the Subject Hub
+      return baseDistance * 0.34;
+    case 'hub-spoke':
+      // Balanced radial starburst radius around each Gold Hub
+      return baseDistance * (0.64 + jitter);
+    case 'trivia':
+      // Lets Orange Trivia nodes float naturally between constellations
+      return baseDistance * 1.15;
+    case 'hub-loop':
+      // Keeps neighboring Subject Hubs comfortably spaced around the galaxy
+      return baseDistance * 1.85;
+    case 'cross':
+    default:
+      return baseDistance * 1.3;
+  }
+}
+
+function computeLinkStrength(link, baseStrength, isLocal) {
+  if (isLocal) return Math.min(1, baseStrength * 0.7);
+  const kind = classifyLink(link);
+
+  switch (kind) {
+    case 'summary':
+      return Math.min(1, baseStrength * 0.9);
+    case 'hub-spoke':
+      return Math.min(1, baseStrength * 0.65);
+    case 'sibling':
+      return Math.min(1, baseStrength * 0.28);
+    case 'trivia':
+      return Math.min(1, baseStrength * 0.085);
+    case 'hub-loop':
+      return Math.min(1, baseStrength * 0.045);
+    case 'cross':
+    default:
+      return Math.min(1, baseStrength * 0.065);
+  }
+}
+
+function computeNodeCharge(node, baseRepel, isLocal) {
+  if (isLocal) return -baseRepel * 26;
+  const role = node.role || 'chapter';
+  const deg = node.degree || 1;
+
+  if (role === 'hub') {
+    return -baseRepel * (44 + Math.min(20, deg * 0.6));
+  }
+  if (role === 'trivia') {
+    return -baseRepel * 30;
+  }
+  if (role === 'summary') {
+    // Gentle outward repulsion so summary leaves fan evenly along the outer rim
+    return -baseRepel * 15;
+  }
+  return -baseRepel * 23;
+}
+
+function computeCollideRadius(node, isLocal) {
+  if (isLocal) return 18;
+  const role = node.role || 'chapter';
+  if (role === 'hub') return 20;
+  if (role === 'trivia') return 14;
+  if (role === 'summary') return 9;
+  return 11;
+}
+
+function seedConstellationPositions(nodes, links, baseDistance) {
+  const hubs = nodes.filter((n) => n.role === 'hub');
+  if (hubs.length < 3) return;
+
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const adj = new Map();
+  for (const l of links) {
+    const s = typeof l.source === 'object' ? l.source.id : l.source;
+    const t = typeof l.target === 'object' ? l.target.id : l.target;
+    if (!adj.has(s)) adj.set(s, new Set());
+    if (!adj.has(t)) adj.set(t, new Set());
+    adj.get(s).add(t);
+    adj.get(t).add(s);
+  }
+
+  // Place Subject Hubs on a balanced circular mandala (outer ring + inner ring if > 10)
+  const hubRadius = baseDistance * 2.15;
+  const hubPos = new Map();
+
+  hubs.forEach((hub, idx) => {
+    const angle = (idx / hubs.length) * Math.PI * 2 - Math.PI / 2;
+    const ringScale = hubs.length > 10 && idx % 3 === 0 ? 0.56 : 1.0;
+    const r = hubRadius * ringScale;
+    const x = Math.cos(angle) * r;
+    const y = Math.sin(angle) * r;
+    if (!Number.isFinite(hub.x) || !Number.isFinite(hub.y)) {
+      hub.x = x;
+      hub.y = y;
+    }
+    hubPos.set(hub.id, { x: hub.x, y: hub.y, angle });
+  });
+
+  // Group chapters around their own folder's Subject Hub
+  const hubByFolder = new Map();
+  for (const h of hubs) {
+    if (h.folder) hubByFolder.set(h.folder, h);
+  }
+
+  const chaptersByHub = new Map();
+  for (const n of nodes) {
+    if (n.role !== 'chapter') continue;
+    let owner = n.folder ? hubByFolder.get(n.folder) : null;
+    if (!owner) {
+      for (const nbId of adj.get(n.id) || []) {
+        const nb = nodeById.get(nbId);
+        if (nb?.role === 'hub') {
+          owner = nb;
+          break;
+        }
+      }
+    }
+    if (owner) {
+      if (!chaptersByHub.has(owner.id)) chaptersByHub.set(owner.id, []);
+      chaptersByHub.get(owner.id).push(n);
+    }
+  }
+
+  const chapterR = baseDistance * 0.64;
+  for (const [hubId, chapters] of chaptersByHub.entries()) {
+    const hp = hubPos.get(hubId);
+    if (!hp) continue;
+    chapters.forEach((ch, i) => {
+      if (Number.isFinite(ch.x) && Number.isFinite(ch.y)) return;
+      const a = hp.angle + (i / Math.max(1, chapters.length)) * Math.PI * 2;
+      ch.x = hp.x + Math.cos(a) * chapterR;
+      ch.y = hp.y + Math.sin(a) * chapterR;
+    });
+  }
+
+  // Place Summary leaves radially outward from their parent Mother Chapter
+  const summaryR = baseDistance * 0.44;
+  for (const n of nodes) {
+    if (n.role !== 'summary') continue;
+    if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
+    const nbs = [...(adj.get(n.id) || [])];
+    const parent = nbs.length ? nodeById.get(nbs[0]) : null;
+    if (parent && Number.isFinite(parent.x) && Number.isFinite(parent.y)) {
+      const ownerHub = parent.folder ? hubByFolder.get(parent.folder) : null;
+      const ox = ownerHub && Number.isFinite(ownerHub.x) ? ownerHub.x : 0;
+      const oy = ownerHub && Number.isFinite(ownerHub.y) ? ownerHub.y : 0;
+      const outAngle = Math.atan2(parent.y - oy, parent.x - ox);
+      n.x = parent.x + Math.cos(outAngle) * summaryR;
+      n.y = parent.y + Math.sin(outAngle) * summaryR;
+    }
+  }
+
+  // Place Trivia nodes at the centroid of their linked nodes (naturally suspended in the center)
+  for (const n of nodes) {
+    if (n.role !== 'trivia') continue;
+    if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
+    let sx = 0;
+    let sy = 0;
+    let cnt = 0;
+    for (const nbId of adj.get(n.id) || []) {
+      const nb = nodeById.get(nbId);
+      if (nb && Number.isFinite(nb.x) && Number.isFinite(nb.y)) {
+        sx += nb.x;
+        sy += nb.y;
+        cnt += 1;
+      }
+    }
+    if (cnt > 0) {
+      const jitterA = hashString(n.id) * Math.PI * 2;
+      n.x = sx / cnt + Math.cos(jitterA) * 18;
+      n.y = sy / cnt + Math.sin(jitterA) * 18;
+    } else {
+      n.x = (hashString(n.id) - 0.5) * 80;
+      n.y = (hashString(`${n.id}!`) - 0.5) * 80;
+    }
+  }
+}
+
+function wrapLabelLines(ctx, text, maxWidth, maxLines = 2) {
   if (!text) return [];
   if (ctx.measureText(text).width <= maxWidth) return [text];
 
@@ -89,75 +329,29 @@ function wrapLabelLines(ctx, text, maxWidth, maxLines = 4) {
         lines.push(current);
         current = word;
         if (lines.length === maxLines - 1) {
-          const remaining = [current, ...words.slice(i + 1)].join(' ');
-          lines.push(remaining);
+          let rest = [current, ...words.slice(i + 1)].join(' ');
+          while (rest.length > 4 && ctx.measureText(`${rest}…`).width > maxWidth) {
+            rest = rest.slice(0, -1).trimEnd();
+          }
+          lines.push(
+            ctx.measureText(rest).width <= maxWidth ? rest : `${rest}…`
+          );
           return lines;
         }
       } else {
-        lines.push(word);
+        let truncated = word;
+        while (truncated.length > 4 && ctx.measureText(`${truncated}…`).width > maxWidth) {
+          truncated = truncated.slice(0, -1);
+        }
+        lines.push(`${truncated}…`);
         current = '';
+        if (lines.length >= maxLines) return lines;
       }
     }
   }
 
   if (current) lines.push(current);
   return lines.slice(0, maxLines);
-}
-
-function computeLinkDistance(link, baseDistance) {
-  const sDeg = (typeof link.source === 'object' ? link.source.degree : 1) || 1;
-  const tDeg = (typeof link.target === 'object' ? link.target.degree : 1) || 1;
-  const minDeg = Math.min(sDeg, tDeg);
-  const maxDeg = Math.max(sDeg, tDeg);
-
-  // Chapter -> Summary (leaf) link: full spoke length so summary sits clearly outward from chapter
-  if (minDeg <= 1) {
-    return baseDistance * 0.92;
-  }
-  // Hub -> Chapter spoke: full spoke length with slight organic depth stagger
-  if (maxDeg >= 8 && minDeg <= 4) {
-    const stagger = ((sDeg * 11 + tDeg * 17) % 5) * 0.04;
-    return baseDistance * (0.9 + stagger);
-  }
-  // Cross-cluster bridge between different subjects: wide separation
-  return baseDistance * 1.45;
-}
-
-function computeLinkStrength(link, baseStrength) {
-  const sDeg = (typeof link.source === 'object' ? link.source.degree : 1) || 1;
-  const tDeg = (typeof link.target === 'object' ? link.target.degree : 1) || 1;
-  const minDeg = Math.min(sDeg, tDeg);
-  const maxDeg = Math.max(sDeg, tDeg);
-
-  // Leaf summary tether: holds its full spoke distance cleanly
-  if (minDeg <= 1) {
-    return Math.min(1, baseStrength * 0.72);
-  }
-  // Hub -> Chapter spoke
-  if (maxDeg >= 8 && minDeg <= 4) {
-    return Math.min(1, baseStrength * 0.52);
-  }
-  // Cross-cluster links between two subjects (e.g. Polity <-> Governance):
-  // keep very gentle so two yellow hubs never pull together and tangle their children
-  return Math.min(1, baseStrength * 0.12);
-}
-
-function computeNodeCharge(node, baseRepel) {
-  const deg = node.degree || 1;
-  // Strong uniform repulsion across all nodes so sibling spokes fan out at equal angles,
-  // plus extra territorial repulsion on major Subject Hubs
-  const hubBoost = deg >= 10 ? 1.85 : 1 + Math.min(0.45, (deg - 1) * 0.08);
-  return -baseRepel * 68 * hubBoost;
-}
-
-function computeCollideRadius(node) {
-  const deg = node.degree || 1;
-  // Subject hubs maintain a wide personal territory so two hubs never sit 35px apart
-  if (deg >= 12) {
-    return 95 + Math.sqrt(deg) * 10;
-  }
-  // Every regular note maintains at least 42 world units of personal radius (84 units center-to-center)
-  return 42 + Math.sqrt(deg) * 3;
 }
 
 export default function GraphView({
@@ -233,13 +427,13 @@ export default function GraphView({
     });
 
     baseNodes.forEach((n) => validIds.add(n.id));
-    let filteredLinks = rawLinks.filter(
-      (l) => validIds.has(l.source) && validIds.has(l.target)
+    let filteredDirectedLinks = rawLinks.filter(
+      (l) => validIds.has(l.source) && validIds.has(l.target) && l.source !== l.target
     );
 
     if (mode === 'local' && activeNotePath && validIds.has(activeNotePath)) {
       const adj = new Map();
-      for (const l of filteredLinks) {
+      for (const l of filteredDirectedLinks) {
         if (!adj.has(l.source)) adj.set(l.source, new Set());
         if (!adj.has(l.target)) adj.set(l.target, new Set());
         adj.get(l.source).add(l.target);
@@ -262,23 +456,45 @@ export default function GraphView({
       }
 
       baseNodes = baseNodes.filter((n) => visited.has(n.id));
-      filteredLinks = filteredLinks.filter(
+      filteredDirectedLinks = filteredDirectedLinks.filter(
         (l) => visited.has(l.source) && visited.has(l.target)
       );
     }
 
-    const degreeMap = new Map();
-    for (const l of filteredLinks) {
-      degreeMap.set(l.source, (degreeMap.get(l.source) || 0) + 1);
-      degreeMap.set(l.target, (degreeMap.get(l.target) || 0) + 1);
+    // Deduplicate reciprocal directed links (A->B and B->A) into single undirected physics springs,
+    // while tracking arrow directions cleanly if the user enables "Arrows".
+    const pairMap = new Map();
+    const neighborSets = new Map();
+
+    for (const l of filteredDirectedLinks) {
+      if (!neighborSets.has(l.source)) neighborSets.set(l.source, new Set());
+      if (!neighborSets.has(l.target)) neighborSets.set(l.target, new Set());
+      neighborSets.get(l.source).add(l.target);
+      neighborSets.get(l.target).add(l.source);
+
+      const key = l.source < l.target ? `${l.source}||${l.target}` : `${l.target}||${l.source}`;
+      const existing = pairMap.get(key);
+      if (!existing) {
+        pairMap.set(key, {
+          source: l.source,
+          target: l.target,
+          unresolved: Boolean(l.unresolved),
+          bidirectional: false,
+        });
+      } else {
+        if (existing.source === l.target && existing.target === l.source) {
+          existing.bidirectional = true;
+        }
+        existing.unresolved = existing.unresolved && Boolean(l.unresolved);
+      }
     }
 
+    let uniqueLinks = [...pairMap.values()];
+
     if (!settings.showOrphans && mode === 'global') {
-      baseNodes = baseNodes.filter((n) => (degreeMap.get(n.id) || 0) > 0);
+      baseNodes = baseNodes.filter((n) => (neighborSets.get(n.id)?.size || 0) > 0);
       const keepIds = new Set(baseNodes.map((n) => n.id));
-      filteredLinks = filteredLinks.filter(
-        (l) => keepIds.has(l.source) && keepIds.has(l.target)
-      );
+      uniqueLinks = uniqueLinks.filter((l) => keepIds.has(l.source) && keepIds.has(l.target));
     }
 
     const nodes = baseNodes.map((n) => {
@@ -291,15 +507,18 @@ export default function GraphView({
           }
         }
       }
-      const degree = degreeMap.get(n.id) ?? n.degree ?? 0;
-      return {
+      // True unique neighbor count (fixes the 2x inflated degree bug on bidirectional vaults)
+      const degree = neighborSets.get(n.id)?.size || 0;
+      const enriched = {
         ...n,
         degree,
         groupColor,
       };
+      enriched.role = getNodeRole(enriched);
+      return enriched;
     });
 
-    const links = filteredLinks.map((l) => ({ ...l }));
+    const links = uniqueLinks.map((l) => ({ ...l }));
     return { nodes, links };
   }, [
     vaultIndex,
@@ -316,9 +535,12 @@ export default function GraphView({
   const nodesRef = useRef([]);
   const linksRef = useRef([]);
   const neighborMapRef = useRef(new Map());
-  const cameraRef = useRef({ x: 0, y: 0, k: 0.22 });
-  const overviewScaleRef = useRef(0.22);
+  const cameraRef = useRef({ x: 0, y: 0, k: 0.3 });
+  const overviewScaleRef = useRef(0.3);
   const hoveredNodeRef = useRef(null);
+  const spotlightNodeRef = useRef(null);
+  const hoverBlendRef = useRef(0);
+  const hoverRafRef = useRef(null);
   const draggedNodeRef = useRef(null);
   const drawRef = useRef(() => {});
   const settingsRef = useRef(settings);
@@ -329,19 +551,21 @@ export default function GraphView({
   themeRef.current = themeColors;
   activeNoteRef.current = activeNotePath;
 
-  // Delicate uniform pinpoints for regular notes (1-3 links); distinct bold circles for Subject Hubs
+  // Native Obsidian node proportions: crisp leaves (~2.3px), chapters (~2.9px),
+  // Trivia (~3.7px), Gold Hubs (~5.2px) at overview, scaling smoothly on zoom.
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
     const relZoom =
       mode === 'local'
-        ? 1.05
+        ? 1.15
         : camK / Math.max(0.04, overviewScaleRef.current);
-    const zoomScale = Math.min(1.28, Math.max(0.76, 0.76 + Math.log2(Math.max(1, relZoom)) * 0.14));
-    if (node.unresolved) return 1.45 * mult * zoomScale;
+    const zoomScale = Math.min(2.35, Math.max(0.75, Math.pow(Math.max(0.4, relZoom), 0.34)));
 
-    const effectiveDeg = Math.max(0, (node.degree || 1) - 1);
-    const base = 1.7 + Math.pow(effectiveDeg, 0.72) * 0.34;
-    return Math.min(8.2, base) * mult * zoomScale;
+    if (node.unresolved) return 1.8 * mult * zoomScale;
+
+    const deg = Math.max(1, node.degree || 1);
+    const base = 1.95 + Math.pow(deg - 1, 0.56) * 0.52;
+    return Math.min(5.4, base) * mult * zoomScale;
   };
 
   const fitViewToNodes = () => {
@@ -367,11 +591,11 @@ export default function GraphView({
 
     if (!Number.isFinite(minX)) return;
 
-    const spanX = Math.max(240, maxX - minX);
-    const spanY = Math.max(240, maxY - minY);
-    const pad = mode === 'local' ? 0.68 : 0.85;
+    const spanX = Math.max(200, maxX - minX);
+    const spanY = Math.max(200, maxY - minY);
+    const pad = mode === 'local' ? 0.68 : 0.88;
     const k = Math.min(
-      mode === 'local' ? 1.35 : 1.0,
+      mode === 'local' ? 1.4 : 1.15,
       Math.max(0.04, Math.min((rect.width * pad) / spanX, (rect.height * pad) / spanY))
     );
 
@@ -390,10 +614,11 @@ export default function GraphView({
     drawRef.current();
   };
 
-  // Initialize force simulation with full spoke lengths, uniform sibling repulsion & hub territory buffers
+  // Initialize force simulation with untangled radial constellation seeding + native Obsidian balance
   useEffect(() => {
     const nodes = graphData.nodes;
     const links = graphData.links;
+    const isLocal = mode === 'local';
 
     const prevPos = new Map(nodesRef.current.map((n) => [n.id, { x: n.x, y: n.y }]));
     for (const n of nodes) {
@@ -402,6 +627,10 @@ export default function GraphView({
         n.x = old.x;
         n.y = old.y;
       }
+    }
+
+    if (!isLocal && prevPos.size === 0) {
+      seedConstellationPositions(nodes, links, settings.linkDistance);
     }
 
     const neighborMap = new Map();
@@ -420,28 +649,32 @@ export default function GraphView({
 
     if (simRef.current) simRef.current.stop();
 
+    const centerPull = isLocal
+      ? settings.centerStrength * 0.08
+      : settings.centerStrength * 0.135;
+
     const sim = forceSimulation(nodes)
       .force(
         'link',
         forceLink(links)
           .id((d) => d.id)
-          .distance((l) => computeLinkDistance(l, settings.linkDistance))
-          .strength((l) => computeLinkStrength(l, settings.linkStrength))
-          .iterations(1)
+          .distance((l) => computeLinkDistance(l, settings.linkDistance, isLocal))
+          .strength((l) => computeLinkStrength(l, settings.linkStrength, isLocal))
+          .iterations(2)
       )
       .force(
         'charge',
-        forceManyBody().strength((d) => computeNodeCharge(d, settings.repelStrength))
+        forceManyBody().strength((d) => computeNodeCharge(d, settings.repelStrength, isLocal))
       )
-      .force('x', forceX(0).strength(settings.centerStrength * 0.038))
-      .force('y', forceY(0).strength(settings.centerStrength * 0.038))
+      .force('x', forceX(0).strength(centerPull))
+      .force('y', forceY(0).strength(centerPull))
       .force(
         'collide',
-        forceCollide((d) => computeCollideRadius(d)).iterations(2)
+        forceCollide((d) => computeCollideRadius(d, isLocal)).iterations(1)
       )
-      .alphaDecay(0.02);
+      .alphaDecay(0.022);
 
-    sim.tick(prevPos.size === 0 ? 260 : 60);
+    sim.tick(prevPos.size === 0 ? 300 : 70);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -453,35 +686,40 @@ export default function GraphView({
     return () => {
       sim.stop();
     };
-  }, [graphData]);
+  }, [graphData, mode]);
 
-  // Live-update physics parameters
+  // Live-update physics sliders
   useEffect(() => {
     const sim = simRef.current;
     if (!sim) return;
+    const isLocal = mode === 'local';
 
     const linkForce = sim.force('link');
     if (linkForce) {
       linkForce
-        .distance((l) => computeLinkDistance(l, settings.linkDistance))
-        .strength((l) => computeLinkStrength(l, settings.linkStrength))
-        .iterations(1);
+        .distance((l) => computeLinkDistance(l, settings.linkDistance, isLocal))
+        .strength((l) => computeLinkStrength(l, settings.linkStrength, isLocal))
+        .iterations(2);
     }
     const chargeForce = sim.force('charge');
     if (chargeForce) {
-      chargeForce.strength((d) => computeNodeCharge(d, settings.repelStrength));
+      chargeForce.strength((d) => computeNodeCharge(d, settings.repelStrength, isLocal));
     }
+    const centerPull = isLocal
+      ? settings.centerStrength * 0.08
+      : settings.centerStrength * 0.135;
     const xForce = sim.force('x');
     const yForce = sim.force('y');
-    if (xForce) xForce.strength(settings.centerStrength * 0.038);
-    if (yForce) yForce.strength(settings.centerStrength * 0.038);
+    if (xForce) xForce.strength(centerPull);
+    if (yForce) yForce.strength(centerPull);
 
-    sim.alpha(0.35).restart();
+    sim.alpha(0.4).restart();
   }, [
     settings.linkDistance,
     settings.linkStrength,
     settings.repelStrength,
     settings.centerStrength,
+    mode,
   ]);
 
   useEffect(() => {
@@ -495,12 +733,54 @@ export default function GraphView({
     activeNotePath,
   ]);
 
-  // Screen-space Canvas renderer + desktop hover + mobile press-and-hold spotlight
+  // Smooth 140ms hover spotlight animation + Canvas renderer + desktop/touch interaction
   useEffect(() => {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
     if (!wrap || !canvas) return;
     const ctx = canvas.getContext('2d');
+
+    const startHoverTransition = (nextNode) => {
+      if (nextNode) {
+        spotlightNodeRef.current = nextNode;
+      }
+      hoveredNodeRef.current = nextNode;
+
+      if (hoverRafRef.current) {
+        cancelAnimationFrame(hoverRafRef.current);
+        hoverRafRef.current = null;
+      }
+
+      const target = nextNode ? 1 : 0;
+      const startVal = hoverBlendRef.current;
+      if (Math.abs(target - startVal) < 0.01) {
+        hoverBlendRef.current = target;
+        if (!nextNode) spotlightNodeRef.current = null;
+        draw();
+        return;
+      }
+
+      const duration = 140;
+      const t0 = performance.now();
+
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / duration);
+        const eased = 1 - Math.pow(1 - p, 3);
+        hoverBlendRef.current = startVal + (target - startVal) * eased;
+        draw();
+        if (p < 1) {
+          hoverRafRef.current = requestAnimationFrame(step);
+        } else {
+          hoverRafRef.current = null;
+          if (!hoveredNodeRef.current) {
+            spotlightNodeRef.current = null;
+          }
+          draw();
+        }
+      };
+
+      hoverRafRef.current = requestAnimationFrame(step);
+    };
 
     const draw = () => {
       const rect = wrap.getBoundingClientRect();
@@ -520,9 +800,12 @@ export default function GraphView({
       const colors = themeRef.current;
       const cfg = settingsRef.current;
       const cam = cameraRef.current;
-      const hovered = hoveredNodeRef.current;
+      const blend = hoverBlendRef.current;
+      const spotlight = blend > 0.005 ? spotlightNodeRef.current : null;
+      const spotlightNeighbors = spotlight
+        ? neighborMapRef.current.get(spotlight.id)
+        : null;
       const activePath = activeNoteRef.current;
-      const hoveredNeighbors = hovered ? neighborMapRef.current.get(hovered.id) : null;
 
       ctx.fillStyle = colors.bg;
       ctx.fillRect(0, 0, rect.width, rect.height);
@@ -530,9 +813,16 @@ export default function GraphView({
       const toScreenX = (wx) => wx * cam.k + cam.x;
       const toScreenY = (wy) => wy * cam.k + cam.y;
 
-      const screenLineWidth = Math.max(0.45, 0.62 * cfg.lineSizeMultiplier);
+      const relZoom =
+        mode === 'local'
+          ? 1.4
+          : cam.k / Math.max(0.04, overviewScaleRef.current);
 
-      // 1. Draw hairline edges
+      // Subtle dynamic link width: silky hairline at overview, gently fuller when zoomed in
+      const zoomLineScale = Math.min(1.65, Math.max(0.85, Math.pow(Math.max(0.5, relZoom), 0.22)));
+      const baseLineWidth = Math.max(0.45, 0.68 * (cfg.lineSizeMultiplier || 1) * zoomLineScale);
+
+      // 1. Draw translucent hairline edges
       for (const l of linksRef.current) {
         const s = l.source;
         const t = l.target;
@@ -544,25 +834,36 @@ export default function GraphView({
         const ty = toScreenY(t.y);
 
         if (
-          (sx < -50 && tx < -50) ||
-          (sx > rect.width + 50 && tx > rect.width + 50) ||
-          (sy < -50 && ty < -50) ||
-          (sy > rect.height + 50 && ty > rect.height + 50)
+          (sx < -60 && tx < -60) ||
+          (sx > rect.width + 60 && tx > rect.width + 60) ||
+          (sy < -60 && ty < -60) ||
+          (sy > rect.height + 60 && ty > rect.height + 60)
         ) {
           continue;
         }
 
-        const isConnectedToHover =
-          hovered && (s.id === hovered.id || t.id === hovered.id);
+        const isConnected =
+          spotlight && (s.id === spotlight.id || t.id === spotlight.id);
+
+        const baseAlpha = l.unresolved ? 0.18 : 0.62;
+        let alpha = baseAlpha;
+        let lineWidth = baseLineWidth;
+        let stroke = colors.line;
+
+        if (spotlight) {
+          if (isConnected) {
+            alpha = baseAlpha + (0.94 - baseAlpha) * blend;
+            lineWidth = baseLineWidth * (1 + 0.65 * blend);
+            if (blend > 0.25) stroke = colors.lineActive;
+          } else {
+            alpha = baseAlpha * (1 - 0.88 * blend);
+          }
+        }
 
         ctx.save();
-        if (hovered) {
-          ctx.globalAlpha = isConnectedToHover ? 0.95 : 0.06;
-        } else {
-          ctx.globalAlpha = l.unresolved ? 0.16 : 0.48;
-        }
-        ctx.strokeStyle = isConnectedToHover ? colors.lineActive : colors.line;
-        ctx.lineWidth = isConnectedToHover ? screenLineWidth * 1.65 : screenLineWidth;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = lineWidth;
 
         ctx.beginPath();
         ctx.moveTo(sx, sy);
@@ -570,29 +871,35 @@ export default function GraphView({
         ctx.stroke();
 
         if (cfg.showArrow) {
-          const angle = Math.atan2(ty - sy, tx - sx);
-          const tr = getScreenRadius(t, cam.k) + 2;
-          const ax = tx - Math.cos(angle) * tr;
-          const ay = ty - Math.sin(angle) * tr;
-          const arrowLen = 5.5;
-          ctx.beginPath();
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(
-            ax - arrowLen * Math.cos(angle - Math.PI / 6),
-            ay - arrowLen * Math.sin(angle - Math.PI / 6)
-          );
-          ctx.lineTo(
-            ax - arrowLen * Math.cos(angle + Math.PI / 6),
-            ay - arrowLen * Math.sin(angle + Math.PI / 6)
-          );
-          ctx.closePath();
-          ctx.fillStyle = isConnectedToHover ? colors.lineActive : colors.line;
-          ctx.fill();
+          const drawArrow = (fromX, fromY, toX, toY, targetNode) => {
+            const angle = Math.atan2(toY - fromY, toX - fromX);
+            const tr = getScreenRadius(targetNode, cam.k) + 2.5;
+            const ax = toX - Math.cos(angle) * tr;
+            const ay = toY - Math.sin(angle) * tr;
+            const arrowLen = 5.5;
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(
+              ax - arrowLen * Math.cos(angle - Math.PI / 6),
+              ay - arrowLen * Math.sin(angle - Math.PI / 6)
+            );
+            ctx.lineTo(
+              ax - arrowLen * Math.cos(angle + Math.PI / 6),
+              ay - arrowLen * Math.sin(angle + Math.PI / 6)
+            );
+            ctx.closePath();
+            ctx.fillStyle = stroke;
+            ctx.fill();
+          };
+          drawArrow(sx, sy, tx, ty, t);
+          if (l.bidirectional) {
+            drawArrow(tx, ty, sx, sy, s);
+          }
         }
         ctx.restore();
       }
 
-      // 2. Draw delicate pinpoint nodes & bold subject hubs
+      // 2. Draw crisp proportional nodes
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
@@ -602,80 +909,176 @@ export default function GraphView({
         }
 
         const r = getScreenRadius(n, cam.k);
-        const isHovered = hovered && hovered.id === n.id;
-        const isNeighbor = hovered && hoveredNeighbors?.has(n.id);
+        const isSpotlight = spotlight && spotlight.id === n.id;
+        const isNeighbor = spotlight && spotlightNeighbors?.has(n.id);
         const isActiveNote = activePath && n.id === activePath;
 
         ctx.save();
-        if (hovered && !isHovered && !isNeighbor) {
-          ctx.globalAlpha = 0.14;
+        if (spotlight && !isSpotlight && !isNeighbor) {
+          ctx.globalAlpha = 1 - 0.84 * blend;
         }
 
+        const drawR = isSpotlight ? r * (1 + 0.28 * blend) : r;
+
         ctx.beginPath();
-        ctx.arc(sx, sy, isHovered ? Math.max(r * 1.25, 4.4) : r, 0, Math.PI * 2);
-        ctx.fillStyle = isHovered
-          ? colors.accent
-          : n.unresolved
-            ? colors.nodeUnresolved
-            : n.groupColor || colors.nodeDefault;
+        ctx.arc(sx, sy, drawR, 0, Math.PI * 2);
+        ctx.fillStyle = n.unresolved
+          ? colors.nodeUnresolved
+          : n.groupColor || colors.nodeDefault;
         ctx.fill();
 
-        if (isActiveNote && !isHovered) {
-          ctx.lineWidth = 1.4;
+        if (isSpotlight && blend > 0.05) {
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = colors.accent;
+          ctx.globalAlpha = blend;
+          ctx.stroke();
+        } else if (isActiveNote) {
+          ctx.lineWidth = 1.5;
           ctx.strokeStyle = colors.accent;
           ctx.stroke();
         }
         ctx.restore();
       }
 
-      // 3. Screen-pixel distance label gate:
-      // Labels stay 100% off until a link spans ~66+ pixels on screen (when ~20-25 nodes are in view)
-      let labelProgress = 0.85;
-      if (mode === 'global') {
-        const screenLinkPx = (cfg.linkDistance || 160) * cam.k;
-        const startPx = 56 * Math.pow(2, -(cfg.textFadeMultiplier || 0) * 0.45);
-        const rawT = (screenLinkPx - startPx) / 38;
-        const clampedT = Math.min(1, Math.max(0, rawT));
-        labelProgress = clampedT * clampedT;
-      }
+      // 3. True Obsidian text-fade threshold (negative = earlier, positive = later)
+      //    plus Hub-first priority fade and screen-space label overlap avoidance.
+      const fadeShift = Math.pow(1.42, cfg.textFadeMultiplier || 0);
+      const baseStartZoom = 1.85 * fadeShift;
+      const fadeSpan = 1.15 * fadeShift;
 
-      // Fine ~7.5px - 8.4px regular (400) font & compact ~95px 3-line wrap block matching Obsidian
-      const dynamicFontSize = (7.4 + labelProgress * 1.0).toFixed(1);
-      const wrapWidth = Math.round(88 + labelProgress * 10);
-
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-
+      const labelCandidates = [];
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
         const sy = toScreenY(n.y);
-        if (sx < -100 || sx > rect.width + 100 || sy < -50 || sy > rect.height + 50) {
+        if (sx < -120 || sx > rect.width + 120 || sy < -50 || sy > rect.height + 50) {
           continue;
         }
 
-        const isHovered = hovered && hovered.id === n.id;
+        const isSpotlight = spotlight && spotlight.id === n.id;
+        const isNeighbor = spotlight && spotlightNeighbors?.has(n.id);
         const isActiveNote = activePath && n.id === activePath;
 
-        let alpha = labelProgress;
-        if (isHovered || isActiveNote) {
-          alpha = 1;
-        } else if (hovered) {
-          alpha = labelProgress * 0.1;
+        let alpha = 0;
+        if (mode === 'local') {
+          alpha = 0.92;
+        } else {
+          // Importance-tiered reveal: Hubs appear first, then Trivia, then Chapters, then Summaries
+          const roleFactor =
+            n.role === 'hub'
+              ? 0.72
+              : n.role === 'trivia'
+                ? 0.86
+                : n.role === 'chapter'
+                  ? 1.02
+                  : 1.24;
+          const nodeStart = baseStartZoom * roleFactor;
+          const rawT = (relZoom - nodeStart) / Math.max(0.35, fadeSpan);
+          const clamped = Math.min(1, Math.max(0, rawT));
+          alpha = clamped * clamped * (3 - 2 * clamped); // smoothstep
         }
 
-        if (alpha <= 0.025) continue;
+        if (spotlight) {
+          if (isSpotlight) {
+            alpha = Math.max(alpha, blend);
+          } else if (isNeighbor) {
+            // Gently reveal connected neighbor titles when hovered
+            alpha = Math.max(alpha, blend * (relZoom > 1.25 ? 0.85 : 0.55));
+          } else {
+            alpha *= 1 - 0.9 * blend;
+          }
+        }
 
-        ctx.font = `${isHovered ? '500 10.2' : `400 ${dynamicFontSize}`}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
-        const lines = wrapLabelLines(ctx, n.title, isHovered ? 135 : wrapWidth, 3);
+        if (isActiveNote) {
+          alpha = Math.max(alpha, 0.95);
+        }
 
-        const r = getScreenRadius(n, cam.k);
-        const lineHeight = isHovered ? 12.5 : Number(dynamicFontSize) * 1.22;
+        if (alpha <= 0.03) continue;
+
+        const priority = isSpotlight
+          ? 10000
+          : isActiveNote
+            ? 5000
+            : isNeighbor
+              ? 2000 + (n.degree || 0)
+              : (n.role === 'hub' ? 1000 : n.role === 'trivia' ? 500 : 100) +
+                (n.degree || 0);
+
+        labelCandidates.push({
+          node: n,
+          sx,
+          sy,
+          alpha,
+          priority,
+          isSpotlight,
+          isActiveNote,
+          isNeighbor,
+        });
+      }
+
+      labelCandidates.sort((a, b) => b.priority - a.priority);
+
+      const placedBoxes = [];
+      const baseFontSize =
+        mode === 'local'
+          ? 11.5
+          : Math.min(12.2, Math.max(10.2, 9.8 + Math.log2(Math.max(1, relZoom)) * 1.05));
+      const baseWrapWidth = Math.round(
+        Math.min(185, Math.max(135, 130 + Math.log2(Math.max(1, relZoom)) * 22))
+      );
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      for (const item of labelCandidates) {
+        const { node, sx, sy, alpha, isSpotlight, isActiveNote } = item;
+        const fontSize = isSpotlight ? 12.8 : node.role === 'hub' ? baseFontSize + 0.7 : baseFontSize;
+        const fontWeight = isSpotlight || node.role === 'hub' ? '500' : '400';
+        const wrapW = isSpotlight ? 220 : baseWrapWidth;
+
+        ctx.font = `${fontWeight} ${fontSize.toFixed(1)}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        const lines = wrapLabelLines(ctx, node.title, wrapW, isSpotlight ? 3 : 2);
+        if (lines.length === 0) continue;
+
+        let maxLineW = 0;
+        for (const line of lines) {
+          const w = ctx.measureText(line).width;
+          if (w > maxLineW) maxLineW = w;
+        }
+
+        const r = getScreenRadius(node, cam.k);
+        const lineHeight = fontSize * 1.28;
+        const startY = sy + (isSpotlight ? r * 1.28 : r) + 5;
+        const boxPadX = 6;
+        const boxPadY = 3;
+        const x1 = sx - maxLineW / 2 - boxPadX;
+        const x2 = sx + maxLineW / 2 + boxPadX;
+        const y1 = startY - boxPadY;
+        const y2 = startY + lines.length * lineHeight + boxPadY;
+
+        // Overlap avoidance: hovered/active notes always draw; others skip if colliding
+        if (!isSpotlight && !isActiveNote) {
+          let overlaps = false;
+          for (let i = 0; i < placedBoxes.length; i++) {
+            const b = placedBoxes[i];
+            if (x1 < b[2] && x2 > b[0] && y1 < b[3] && y2 > b[1]) {
+              overlaps = true;
+              break;
+            }
+          }
+          if (overlaps) continue;
+        }
+
+        placedBoxes.push([x1, y1, x2, y2]);
 
         ctx.save();
-        ctx.globalAlpha = isHovered ? 1 : alpha * 0.82;
-        ctx.fillStyle = colors.text;
-        const startY = sy + (isHovered ? Math.max(r * 1.25, 4.4) : r) + 4;
+        ctx.globalAlpha = isSpotlight ? Math.min(1, alpha) : alpha * 0.9;
+        ctx.fillStyle = isSpotlight
+          ? colors.isLight
+            ? '#111111'
+            : '#f3f3f3'
+          : colors.text;
+
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i], sx, startY + i * lineHeight);
         }
@@ -744,11 +1147,10 @@ export default function GraphView({
         isLongPress = false;
         touchTargetNode = null;
         draggedNodeRef.current = null;
-        hoveredNodeRef.current = null;
+        startHoverTransition(null);
         isPanning = false;
         const pts = [...activePointers.values()];
         lastPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-        draw();
         return;
       }
 
@@ -766,24 +1168,22 @@ export default function GraphView({
           clearLongPressTimer();
           longPressTimer = setTimeout(() => {
             isLongPress = true;
-            hoveredNodeRef.current = hit;
+            startHoverTransition(hit);
             draggedNodeRef.current = hit;
             hit.fx = hit.x;
             hit.fy = hit.y;
             simRef.current?.alphaTarget(0.15).restart();
-            draw();
           }, 200);
         } else {
-          hoveredNodeRef.current = null;
+          startHoverTransition(null);
           isPanning = true;
-          draw();
         }
         return;
       }
 
       if (hit) {
         draggedNodeRef.current = hit;
-        hoveredNodeRef.current = hit;
+        startHoverTransition(hit);
         hit.fx = hit.x;
         hit.fy = hit.y;
         simRef.current?.alphaTarget(0.25).restart();
@@ -821,7 +1221,7 @@ export default function GraphView({
       if (e.pointerType === 'touch' && touchTargetNode && !draggedNodeRef.current && distFromStart > 7) {
         clearLongPressTimer();
         isLongPress = true;
-        hoveredNodeRef.current = touchTargetNode;
+        startHoverTransition(touchTargetNode);
         draggedNodeRef.current = touchTargetNode;
         touchTargetNode.fx = touchTargetNode.x;
         touchTargetNode.fy = touchTargetNode.y;
@@ -851,9 +1251,8 @@ export default function GraphView({
       if (e.pointerType !== 'touch') {
         const hit = hitTestNode(e.clientX, e.clientY, false);
         if (hit !== hoveredNodeRef.current) {
-          hoveredNodeRef.current = hit;
           canvas.style.cursor = hit && !hit.unresolved ? 'pointer' : 'grab';
-          draw();
+          startHoverTransition(hit);
         }
       }
     };
@@ -879,10 +1278,9 @@ export default function GraphView({
         }
 
         if (isLongPress) {
-          hoveredNodeRef.current = null;
+          startHoverTransition(null);
           isLongPress = false;
           touchTargetNode = null;
-          draw();
         } else if (touchTargetNode && movedDist < 7 && !touchTargetNode.unresolved && onSelectNote) {
           const target = touchTargetNode;
           touchTargetNode = null;
@@ -906,6 +1304,13 @@ export default function GraphView({
         }
       }
       isPanning = false;
+    };
+
+    const onPointerLeave = () => {
+      if (!draggedNodeRef.current && hoveredNodeRef.current) {
+        canvas.style.cursor = 'grab';
+        startHoverTransition(null);
+      }
     };
 
     const onWheel = (e) => {
@@ -934,15 +1339,18 @@ export default function GraphView({
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
       clearLongPressTimer();
+      if (hoverRafRef.current) cancelAnimationFrame(hoverRafRef.current);
       resizeObs.disconnect();
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', onPointerUp);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('wheel', onWheel);
     };
   }, [onSelectNote, mode]);
@@ -981,7 +1389,7 @@ export default function GraphView({
         <button
           className="obs-icon-btn"
           style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-          onClick={() => simRef.current?.alpha(0.75).restart()}
+          onClick={() => simRef.current?.alpha(0.8).restart()}
           title="Animate / Re-layout graph"
         >
           <Sparkles size={14} />
