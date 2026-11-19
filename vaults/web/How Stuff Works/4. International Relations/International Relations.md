@@ -147,6 +147,8 @@
 
 #### 🔗 Connected Vault Compendiums
 - [[Anatomy of Political Belief]]
+- [[Geopolitics of Imperial Capital Shifts]]
+- [[Global Flag Color Families]]
 - [[Hydrocarbon Fuels - Chemistry & Engineering]]
 - [[Sovereignty of Serbia and Bosnia]]
 <!-- OBSIDIAN-WEB-END -->

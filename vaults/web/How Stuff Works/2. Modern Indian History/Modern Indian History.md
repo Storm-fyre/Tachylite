@@ -174,4 +174,7 @@
 - [[17. Nehruvian State - Planning, Industry & Non-Alignment]]
 - [[18. Green Revolution, 1971 War & The Emergency]]
 - [[19. Post-1980s - Mandal-Mandir-Market & Digital State]]
+
+#### 🔗 Connected Vault Compendiums
+- [[Geopolitics of Imperial Capital Shifts]]
 <!-- OBSIDIAN-WEB-END -->

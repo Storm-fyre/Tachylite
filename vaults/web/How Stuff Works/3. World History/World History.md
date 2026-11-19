@@ -137,5 +137,7 @@
 - [[14. Neoliberal Turn, Deng's Reforms & Soviet Collapse]]
 
 #### 🔗 Connected Vault Compendiums
+- [[Geopolitics of Imperial Capital Shifts]]
+- [[Global Flag Color Families]]
 - [[Sovereignty of Serbia and Bosnia]]
 <!-- OBSIDIAN-WEB-END -->

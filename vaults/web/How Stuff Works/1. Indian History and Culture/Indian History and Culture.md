@@ -209,6 +209,7 @@
 
 #### 🔗 Connected Vault Compendiums
 - [[Cattle and Buffaloes]]
+- [[Geopolitics of Imperial Capital Shifts]]
 - [[Heuristics and Razors]]
 - [[Modified Zellers Congruence]]
 <!-- OBSIDIAN-WEB-END -->

@@ -71,4 +71,6 @@ The sovereignty of Serbia and Bosnia and Herzegovina was at the heart of the geo
 
 #### 🔗 Related Compendiums
 - [[Anatomy of Political Belief]]
+- [[Global Flag Color Families]]
+- [[Geopolitics of Imperial Capital Shifts]]
 <!-- OBSIDIAN-WEB-END -->

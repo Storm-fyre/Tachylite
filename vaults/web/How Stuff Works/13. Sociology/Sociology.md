@@ -99,4 +99,5 @@
 #### 🔗 Connected Vault Compendiums
 - [[Anatomy of Political Belief]]
 - [[Cattle and Buffaloes]]
+- [[Global Flag Color Families]]
 <!-- OBSIDIAN-WEB-END -->

@@ -357,4 +357,6 @@ Here is how all eight levels combine to produce every position on the Political 
 - [[Heuristics and Razors]]
 - [[Human Genetics and Blood Groups]]
 - [[Sovereignty of Serbia and Bosnia]]
+- [[Global Flag Color Families]]
+- [[Geopolitics of Imperial Capital Shifts]]
 <!-- OBSIDIAN-WEB-END -->
