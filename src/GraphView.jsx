@@ -99,17 +99,11 @@ function classifyLink(link) {
   const rB = t.role || 'chapter';
   const sameFolder = Boolean(s.folder && t.folder && s.folder === t.folder);
 
-  // Leaf summary tether (Mother Chapter <-> Summary Dendrite)
   if (rA === 'summary' || rB === 'summary') return 'summary';
-  // Hub-to-hub outer constellation loop
   if (rA === 'hub' && rB === 'hub') return 'hub-loop';
-  // Subject Hub <-> Chapter in its own constellation
   if ((rA === 'hub' || rB === 'hub') && sameFolder) return 'hub-spoke';
-  // Sequential chapters within the same subject folder
   if (rA === 'chapter' && rB === 'chapter' && sameFolder) return 'sibling';
-  // Trivia bridge connections
   if (rA === 'trivia' || rB === 'trivia') return 'trivia';
-  // Cross-subject synapses between two different folders
   return 'cross';
 }
 
@@ -122,83 +116,87 @@ function hashString(str) {
   return (h >>> 0) / 4294967295;
 }
 
+// Airy filament spoke geometry (avoids tight concentric "daisy" rings)
 function computeLinkDistance(link, baseDistance, isLocal) {
-  if (isLocal) return baseDistance * 0.52;
+  if (isLocal) return baseDistance * 0.55;
   const kind = classifyLink(link);
   const s = link.source;
   const t = link.target;
-  const jitter = (hashString(`${s.id}|${t.id}`) - 0.5) * 0.1;
+  const jitter = (hashString(`${s.id}|${t.id}`) - 0.5) * 0.24;
 
   switch (kind) {
     case 'summary':
-      // Crisp outward halo around each Mother Chapter
-      return baseDistance * (0.42 + jitter * 0.5);
+      // Sweeping outward filaments around Mother Chapters
+      return baseDistance * (0.78 + jitter * 0.65);
     case 'sibling':
-      // Smooth sequential arc around the Subject Hub
-      return baseDistance * 0.34;
+      // Relaxed arc spacing so chapters don't lock into stiff pearl necklaces
+      return baseDistance * (0.72 + jitter * 0.4);
     case 'hub-spoke':
-      // Balanced radial starburst radius around each Gold Hub
-      return baseDistance * (0.64 + jitter);
+      // Airy, organically staggered starburst spokes
+      return baseDistance * (0.94 + jitter * 0.85);
     case 'trivia':
-      // Lets Orange Trivia nodes float naturally between constellations
-      return baseDistance * 1.15;
+      // Integrates Trivia nodes naturally inside the central neural lattice
+      return baseDistance * 1.05;
     case 'hub-loop':
-      // Keeps neighboring Subject Hubs comfortably spaced around the galaxy
-      return baseDistance * 1.85;
+      return baseDistance * 1.45;
     case 'cross':
     default:
-      return baseDistance * 1.3;
+      // Lets cross-subject chapters stretch organically toward neighboring clusters
+      return baseDistance * 1.12;
   }
 }
 
+// Balanced ~2.5:1 elasticity ratio: clean non-cluttered clusters woven into one unified web
 function computeLinkStrength(link, baseStrength, isLocal) {
   if (isLocal) return Math.min(1, baseStrength * 0.7);
   const kind = classifyLink(link);
 
   switch (kind) {
     case 'summary':
-      return Math.min(1, baseStrength * 0.9);
+      return Math.min(1, baseStrength * 0.72);
     case 'hub-spoke':
-      return Math.min(1, baseStrength * 0.65);
+      return Math.min(1, baseStrength * 0.54);
     case 'sibling':
-      return Math.min(1, baseStrength * 0.28);
+      return Math.min(1, baseStrength * 0.22);
     case 'trivia':
-      return Math.min(1, baseStrength * 0.085);
-    case 'hub-loop':
-      return Math.min(1, baseStrength * 0.045);
+      return Math.min(1, baseStrength * 0.28);
     case 'cross':
+      return Math.min(1, baseStrength * 0.24);
+    case 'hub-loop':
     default:
-      return Math.min(1, baseStrength * 0.065);
+      return Math.min(1, baseStrength * 0.14);
   }
 }
 
+// Smooth, near-uniform electrostatic repulsion for airy negative space
 function computeNodeCharge(node, baseRepel, isLocal) {
   if (isLocal) return -baseRepel * 26;
   const role = node.role || 'chapter';
   const deg = node.degree || 1;
 
   if (role === 'hub') {
-    return -baseRepel * (44 + Math.min(20, deg * 0.6));
+    return -baseRepel * (50 + Math.min(18, deg * 0.45));
   }
   if (role === 'trivia') {
-    return -baseRepel * 30;
+    return -baseRepel * 42;
   }
   if (role === 'summary') {
-    // Gentle outward repulsion so summary leaves fan evenly along the outer rim
-    return -baseRepel * 15;
+    return -baseRepel * 31;
   }
-  return -baseRepel * 23;
+  return -baseRepel * 38;
 }
 
+// Minimal overlap-only floor (no artificial billiard-ball rigidity)
 function computeCollideRadius(node, isLocal) {
-  if (isLocal) return 18;
+  if (isLocal) return 14;
   const role = node.role || 'chapter';
-  if (role === 'hub') return 20;
-  if (role === 'trivia') return 14;
-  if (role === 'summary') return 9;
-  return 11;
+  if (role === 'hub') return 10;
+  if (role === 'trivia') return 7;
+  if (role === 'summary') return 5;
+  return 6;
 }
 
+// Loose organic pre-seeding to prevent tangled crossings without forcing rigid circles
 function seedConstellationPositions(nodes, links, baseDistance) {
   const hubs = nodes.filter((n) => n.role === 'hub');
   if (hubs.length < 3) return;
@@ -214,24 +212,21 @@ function seedConstellationPositions(nodes, links, baseDistance) {
     adj.get(t).add(s);
   }
 
-  // Place Subject Hubs on a balanced circular mandala (outer ring + inner ring if > 10)
-  const hubRadius = baseDistance * 2.15;
+  const hubRadius = baseDistance * 2.1;
   const hubPos = new Map();
 
   hubs.forEach((hub, idx) => {
-    const angle = (idx / hubs.length) * Math.PI * 2 - Math.PI / 2;
-    const ringScale = hubs.length > 10 && idx % 3 === 0 ? 0.56 : 1.0;
+    const hRand = hashString(hub.id);
+    const angle = (idx / hubs.length) * Math.PI * 2 + (hRand - 0.5) * 0.28;
+    const ringScale = hubs.length > 10 && idx % 3 === 0 ? 0.52 + hRand * 0.14 : 0.88 + hRand * 0.24;
     const r = hubRadius * ringScale;
-    const x = Math.cos(angle) * r;
-    const y = Math.sin(angle) * r;
     if (!Number.isFinite(hub.x) || !Number.isFinite(hub.y)) {
-      hub.x = x;
-      hub.y = y;
+      hub.x = Math.cos(angle) * r;
+      hub.y = Math.sin(angle) * r;
     }
     hubPos.set(hub.id, { x: hub.x, y: hub.y, angle });
   });
 
-  // Group chapters around their own folder's Subject Hub
   const hubByFolder = new Map();
   for (const h of hubs) {
     if (h.folder) hubByFolder.set(h.folder, h);
@@ -256,20 +251,19 @@ function seedConstellationPositions(nodes, links, baseDistance) {
     }
   }
 
-  const chapterR = baseDistance * 0.64;
   for (const [hubId, chapters] of chaptersByHub.entries()) {
     const hp = hubPos.get(hubId);
     if (!hp) continue;
     chapters.forEach((ch, i) => {
       if (Number.isFinite(ch.x) && Number.isFinite(ch.y)) return;
-      const a = hp.angle + (i / Math.max(1, chapters.length)) * Math.PI * 2;
-      ch.x = hp.x + Math.cos(a) * chapterR;
-      ch.y = hp.y + Math.sin(a) * chapterR;
+      const jitter = hashString(ch.id);
+      const a = hp.angle + (i / Math.max(1, chapters.length)) * Math.PI * 2 + (jitter - 0.5) * 0.35;
+      const rad = baseDistance * (0.7 + jitter * 0.45);
+      ch.x = hp.x + Math.cos(a) * rad;
+      ch.y = hp.y + Math.sin(a) * rad;
     });
   }
 
-  // Place Summary leaves radially outward from their parent Mother Chapter
-  const summaryR = baseDistance * 0.44;
   for (const n of nodes) {
     if (n.role !== 'summary') continue;
     if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
@@ -279,13 +273,14 @@ function seedConstellationPositions(nodes, links, baseDistance) {
       const ownerHub = parent.folder ? hubByFolder.get(parent.folder) : null;
       const ox = ownerHub && Number.isFinite(ownerHub.x) ? ownerHub.x : 0;
       const oy = ownerHub && Number.isFinite(ownerHub.y) ? ownerHub.y : 0;
-      const outAngle = Math.atan2(parent.y - oy, parent.x - ox);
-      n.x = parent.x + Math.cos(outAngle) * summaryR;
-      n.y = parent.y + Math.sin(outAngle) * summaryR;
+      const jitter = (hashString(n.id) - 0.5) * 0.6;
+      const outAngle = Math.atan2(parent.y - oy, parent.x - ox) + jitter;
+      const rad = baseDistance * (0.65 + hashString(`${n.id}:r`) * 0.3);
+      n.x = parent.x + Math.cos(outAngle) * rad;
+      n.y = parent.y + Math.sin(outAngle) * rad;
     }
   }
 
-  // Place Trivia nodes at the centroid of their linked nodes (naturally suspended in the center)
   for (const n of nodes) {
     if (n.role !== 'trivia') continue;
     if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
@@ -302,11 +297,11 @@ function seedConstellationPositions(nodes, links, baseDistance) {
     }
     if (cnt > 0) {
       const jitterA = hashString(n.id) * Math.PI * 2;
-      n.x = sx / cnt + Math.cos(jitterA) * 18;
-      n.y = sy / cnt + Math.sin(jitterA) * 18;
+      n.x = sx / cnt + Math.cos(jitterA) * 28;
+      n.y = sy / cnt + Math.sin(jitterA) * 28;
     } else {
-      n.x = (hashString(n.id) - 0.5) * 80;
-      n.y = (hashString(`${n.id}!`) - 0.5) * 80;
+      n.x = (hashString(n.id) - 0.5) * 120;
+      n.y = (hashString(`${n.id}!`) - 0.5) * 120;
     }
   }
 }
@@ -461,8 +456,6 @@ export default function GraphView({
       );
     }
 
-    // Deduplicate reciprocal directed links (A->B and B->A) into single undirected physics springs,
-    // while tracking arrow directions cleanly if the user enables "Arrows".
     const pairMap = new Map();
     const neighborSets = new Map();
 
@@ -507,7 +500,6 @@ export default function GraphView({
           }
         }
       }
-      // True unique neighbor count (fixes the 2x inflated degree bug on bidirectional vaults)
       const degree = neighborSets.get(n.id)?.size || 0;
       const enriched = {
         ...n,
@@ -551,21 +543,21 @@ export default function GraphView({
   themeRef.current = themeColors;
   activeNoteRef.current = activeNotePath;
 
-  // Native Obsidian node proportions: crisp leaves (~2.3px), chapters (~2.9px),
-  // Trivia (~3.7px), Gold Hubs (~5.2px) at overview, scaling smoothly on zoom.
+  // Razor-sharp native Obsidian pinpoint radii at overview (~1.5px leaves, ~2.3px chapters,
+  // ~3.0px Trivia, ~4.3px Gold Hubs), growing smoothly as you zoom into a cluster.
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
     const relZoom =
       mode === 'local'
-        ? 1.15
+        ? 1.35
         : camK / Math.max(0.04, overviewScaleRef.current);
-    const zoomScale = Math.min(2.35, Math.max(0.75, Math.pow(Math.max(0.4, relZoom), 0.34)));
+    const zoomScale = Math.min(2.65, Math.max(0.78, Math.pow(Math.max(0.4, relZoom), 0.38)));
 
-    if (node.unresolved) return 1.8 * mult * zoomScale;
+    if (node.unresolved) return 1.3 * mult * zoomScale;
 
     const deg = Math.max(1, node.degree || 1);
-    const base = 1.95 + Math.pow(deg - 1, 0.56) * 0.52;
-    return Math.min(5.4, base) * mult * zoomScale;
+    const base = 1.32 + Math.pow(deg - 1, 0.55) * 0.38;
+    return Math.min(3.75, base) * mult * zoomScale;
   };
 
   const fitViewToNodes = () => {
@@ -614,7 +606,6 @@ export default function GraphView({
     drawRef.current();
   };
 
-  // Initialize force simulation with untangled radial constellation seeding + native Obsidian balance
   useEffect(() => {
     const nodes = graphData.nodes;
     const links = graphData.links;
@@ -651,7 +642,7 @@ export default function GraphView({
 
     const centerPull = isLocal
       ? settings.centerStrength * 0.08
-      : settings.centerStrength * 0.135;
+      : settings.centerStrength * 0.125;
 
     const sim = forceSimulation(nodes)
       .force(
@@ -672,9 +663,9 @@ export default function GraphView({
         'collide',
         forceCollide((d) => computeCollideRadius(d, isLocal)).iterations(1)
       )
-      .alphaDecay(0.022);
+      .alphaDecay(0.02);
 
-    sim.tick(prevPos.size === 0 ? 300 : 70);
+    sim.tick(prevPos.size === 0 ? 340 : 75);
     simRef.current = sim;
 
     fitViewToNodes();
@@ -688,7 +679,6 @@ export default function GraphView({
     };
   }, [graphData, mode]);
 
-  // Live-update physics sliders
   useEffect(() => {
     const sim = simRef.current;
     if (!sim) return;
@@ -707,7 +697,7 @@ export default function GraphView({
     }
     const centerPull = isLocal
       ? settings.centerStrength * 0.08
-      : settings.centerStrength * 0.135;
+      : settings.centerStrength * 0.125;
     const xForce = sim.force('x');
     const yForce = sim.force('y');
     if (xForce) xForce.strength(centerPull);
@@ -818,9 +808,9 @@ export default function GraphView({
           ? 1.4
           : cam.k / Math.max(0.04, overviewScaleRef.current);
 
-      // Subtle dynamic link width: silky hairline at overview, gently fuller when zoomed in
-      const zoomLineScale = Math.min(1.65, Math.max(0.85, Math.pow(Math.max(0.5, relZoom), 0.22)));
-      const baseLineWidth = Math.max(0.45, 0.68 * (cfg.lineSizeMultiplier || 1) * zoomLineScale);
+      // Silky hairline edges at overview, gently fuller when zoomed in
+      const zoomLineScale = Math.min(1.7, Math.max(0.85, Math.pow(Math.max(0.5, relZoom), 0.24)));
+      const baseLineWidth = Math.max(0.4, 0.56 * (cfg.lineSizeMultiplier || 1) * zoomLineScale);
 
       // 1. Draw translucent hairline edges
       for (const l of linksRef.current) {
@@ -845,7 +835,7 @@ export default function GraphView({
         const isConnected =
           spotlight && (s.id === spotlight.id || t.id === spotlight.id);
 
-        const baseAlpha = l.unresolved ? 0.18 : 0.62;
+        const baseAlpha = l.unresolved ? 0.14 : 0.48;
         let alpha = baseAlpha;
         let lineWidth = baseLineWidth;
         let stroke = colors.line;
@@ -853,7 +843,7 @@ export default function GraphView({
         if (spotlight) {
           if (isConnected) {
             alpha = baseAlpha + (0.94 - baseAlpha) * blend;
-            lineWidth = baseLineWidth * (1 + 0.65 * blend);
+            lineWidth = baseLineWidth * (1 + 0.75 * blend);
             if (blend > 0.25) stroke = colors.lineActive;
           } else {
             alpha = baseAlpha * (1 - 0.88 * blend);
@@ -899,7 +889,7 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 2. Draw crisp proportional nodes
+      // 2. Draw crisp pinpoint nodes
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
@@ -918,7 +908,7 @@ export default function GraphView({
           ctx.globalAlpha = 1 - 0.84 * blend;
         }
 
-        const drawR = isSpotlight ? r * (1 + 0.28 * blend) : r;
+        const drawR = isSpotlight ? r * (1 + 0.3 * blend) : r;
 
         ctx.beginPath();
         ctx.arc(sx, sy, drawR, 0, Math.PI * 2);
@@ -963,7 +953,6 @@ export default function GraphView({
         if (mode === 'local') {
           alpha = 0.92;
         } else {
-          // Importance-tiered reveal: Hubs appear first, then Trivia, then Chapters, then Summaries
           const roleFactor =
             n.role === 'hub'
               ? 0.72
@@ -975,14 +964,13 @@ export default function GraphView({
           const nodeStart = baseStartZoom * roleFactor;
           const rawT = (relZoom - nodeStart) / Math.max(0.35, fadeSpan);
           const clamped = Math.min(1, Math.max(0, rawT));
-          alpha = clamped * clamped * (3 - 2 * clamped); // smoothstep
+          alpha = clamped * clamped * (3 - 2 * clamped);
         }
 
         if (spotlight) {
           if (isSpotlight) {
             alpha = Math.max(alpha, blend);
           } else if (isNeighbor) {
-            // Gently reveal connected neighbor titles when hovered
             alpha = Math.max(alpha, blend * (relZoom > 1.25 ? 0.85 : 0.55));
           } else {
             alpha *= 1 - 0.9 * blend;
@@ -1048,7 +1036,7 @@ export default function GraphView({
 
         const r = getScreenRadius(node, cam.k);
         const lineHeight = fontSize * 1.28;
-        const startY = sy + (isSpotlight ? r * 1.28 : r) + 5;
+        const startY = sy + (isSpotlight ? r * 1.3 : r) + 5;
         const boxPadX = 6;
         const boxPadY = 3;
         const x1 = sx - maxLineW / 2 - boxPadX;
@@ -1056,7 +1044,6 @@ export default function GraphView({
         const y1 = startY - boxPadY;
         const y2 = startY + lines.length * lineHeight + boxPadY;
 
-        // Overlap avoidance: hovered/active notes always draw; others skip if colliding
         if (!isSpotlight && !isActiveNote) {
           let overlaps = false;
           for (let i = 0; i < placedBoxes.length; i++) {
