@@ -176,6 +176,41 @@ body,
   background: transparent;
 }
 
+/* Instant Summary <-> Full Chapter Flip Button (Feature B1) */
+.obs-pair-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  padding: 0 9px;
+  margin-right: 4px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.obs-pair-btn:hover {
+  border-color: var(--interactive-accent);
+  background: var(--bg-modifier-hover);
+  color: var(--text-bright);
+}
+
+.obs-pair-btn.is-to-summary svg {
+  color: #10b981;
+}
+
+.obs-pair-btn.is-to-mother svg {
+  color: #3b82f6;
+}
+
 /* =========================================================
    Sidebars (Left & Right)
    ========================================================= */
@@ -556,6 +591,53 @@ body,
   flex-direction: column;
 }
 
+/* 2px Top Reading Progress Bar (Feature B2) */
+.obs-progress-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.obs-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--interactive-accent);
+  opacity: 0.85;
+  transition: width 0.08s linear;
+}
+
+/* Floating Back-to-Top Button (Feature B4) */
+.obs-back-to-top {
+  position: absolute;
+  right: 22px;
+  bottom: 20px;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  z-index: 18;
+  transition: transform 0.14s ease, border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+
+.obs-back-to-top:hover {
+  color: var(--text-bright);
+  border-color: var(--interactive-accent);
+  background: var(--bg-primary-alt);
+  transform: translateY(-2px);
+}
+
 .obs-reader-scroll {
   flex: 1;
   min-height: 0;
@@ -574,20 +656,21 @@ body,
 }
 
 /* Smart Readable Line Length:
-   Prose stays centered at --reader-max-width (740px), while wide ASCII/code blocks (<pre>)
+   Prose stays centered at --reader-max-width (740px), while wide ASCII/code blocks (<pre> / .obs-pre-wrap)
    and wide tables (<table>) expand symmetrically into the open horizontal pane margins. */
 .obs-reader-container.is-readable-width {
   max-width: 100%;
 }
 
 .obs-reader-container.is-readable-width > :not(.obs-markdown),
-.obs-reader-container.is-readable-width > .obs-markdown > :not(pre):not(table) {
+.obs-reader-container.is-readable-width > .obs-markdown > :not(pre):not(.obs-pre-wrap):not(table) {
   max-width: var(--reader-max-width);
   margin-left: auto;
   margin-right: auto;
 }
 
-.obs-reader-container.is-readable-width > .obs-markdown > pre {
+.obs-reader-container.is-readable-width > .obs-markdown > pre,
+.obs-reader-container.is-readable-width > .obs-markdown > .obs-pre-wrap {
   width: fit-content;
   min-width: min(100%, var(--reader-max-width));
   max-width: 100%;
@@ -784,6 +867,51 @@ body,
   border-radius: 4px;
 }
 
+/* Code & ASCII Block Wrapper with Hover Copy Button (Feature B4) */
+.obs-pre-wrap {
+  position: relative;
+  margin: 1em 0;
+}
+
+.obs-pre-wrap > pre {
+  margin: 0;
+  width: 100%;
+}
+
+.obs-code-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s ease, color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  z-index: 4;
+}
+
+.obs-pre-wrap:hover .obs-code-copy-btn,
+.obs-code-copy-btn:focus-visible,
+.obs-code-copy-btn.is-copied {
+  opacity: 1;
+}
+
+.obs-code-copy-btn:hover {
+  color: var(--text-bright);
+  border-color: var(--interactive-accent);
+}
+
+.obs-code-copy-btn.is-copied {
+  color: #10b981;
+  border-color: #10b981;
+}
+
 .obs-markdown pre {
   background: var(--bg-secondary-alt);
   border: 1px solid var(--border-subtle);
@@ -880,19 +1008,29 @@ body,
 .obs-outline-item {
   background: transparent;
   border: none;
+  border-left: 2px solid transparent;
   text-align: left;
   color: var(--text-muted);
   font-size: 12.5px;
   line-height: 1.4;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 0 4px 4px 0;
   cursor: pointer;
   font-family: var(--font-ui);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .obs-outline-item:hover {
   background: var(--bg-modifier-hover);
   color: var(--text-bright);
+}
+
+/* Live Outline Scroll-Spy Active Heading (Feature B3) */
+.obs-outline-item.is-active {
+  background: var(--bg-modifier-selected);
+  border-left-color: var(--interactive-accent);
+  color: var(--text-accent);
+  font-weight: 550;
 }
 
 .obs-backlink-group {
@@ -1251,6 +1389,11 @@ body,
   padding: 2px 0;
   font-size: 11.5px;
   color: var(--text-normal);
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+
+.obs-graph-legend-item:hover {
+  background: var(--bg-modifier-hover);
 }
 
 .obs-graph-color-dot {
@@ -1362,6 +1505,14 @@ body,
     right: 0;
   }
 
+  .obs-mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 45;
+  }
+
   .obs-reader-scroll {
     padding: 16px 18px 72px;
   }
@@ -1369,6 +1520,15 @@ body,
   .obs-reader-container.is-readable-width > .obs-markdown > table {
     display: block;
     overflow-x: auto;
+  }
+
+  .obs-back-to-top {
+    right: 14px;
+    bottom: 14px;
+  }
+
+  .obs-code-copy-btn {
+    opacity: 0.85;
   }
 
   .obs-hover-preview {

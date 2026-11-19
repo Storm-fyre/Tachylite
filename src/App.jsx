@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import {
   ArrowLeft,
   ArrowRight,
+  BookOpen,
   Bookmark,
   BookmarkCheck,
   ChevronRight,
@@ -21,6 +22,7 @@ import {
   SlidersHorizontal,
   Sun,
   X,
+  Zap,
 } from 'lucide-react';
 import './obsidian.css';
 import Reader, { RightInspector } from './Reader.jsx';
@@ -188,6 +190,8 @@ function App() {
   const [noteData, setNoteData] = useState(null);
   const [loadingNote, setLoadingNote] = useState(false);
   const [targetHeading, setTargetHeading] = useState(null);
+  const [activeHeadingSlug, setActiveHeadingSlug] = useState(null);
+  const [lastOpenedNotePath, setLastOpenedNotePath] = useState(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCorpus, setSearchCorpus] = useState(null);
@@ -203,6 +207,14 @@ function App() {
   );
 
   const activeNotePath = activeTab?.type === 'note' ? activeTab.path : null;
+
+  // Remember last opened note for GraphView's "Fly to Active Note" (Feature A4)
+  useEffect(() => {
+    if (activeNotePath) {
+      setLastOpenedNotePath(activeNotePath);
+    }
+    setActiveHeadingSlug(null);
+  }, [activeNotePath]);
 
   // Apply reading preferences to document CSS variables
   useEffect(() => {
@@ -274,6 +286,8 @@ function App() {
       setTabs([]);
       setActiveTabId(null);
       setNoteData(null);
+      setLastOpenedNotePath(null);
+      setActiveHeadingSlug(null);
       return;
     }
 
@@ -282,6 +296,8 @@ function App() {
     noteCacheRef.current.clear();
     setSearchCorpus(null);
     setSearchQuery('');
+    setLastOpenedNotePath(null);
+    setActiveHeadingSlug(null);
 
     try {
       const savedBm = localStorage.getItem(BOOKMARKS_PREFIX + activeVaultId);
@@ -558,7 +574,6 @@ function App() {
     const rawQ = searchQuery.trim();
     if (!rawQ) return [];
 
-    // Tag query (#subject-hub)
     if (rawQ.startsWith('#')) {
       const tagNeedle = rawQ.slice(1).toLowerCase();
       return vaultIndex.notes
@@ -612,6 +627,26 @@ function App() {
     if (!vaultIndex || !activeNotePath) return null;
     return vaultIndex.notes.find((n) => n.path === activeNotePath) || null;
   }, [vaultIndex, activeNotePath]);
+
+  // Feature B1: Detect Mother Chapter <-> Quick Summary counterpart automatically
+  const pairedNote = useMemo(() => {
+    if (!vaultIndex || !activeNoteMeta) return null;
+    const summarySuffix = ' - Summary';
+    if (activeNoteMeta.title.endsWith(summarySuffix)) {
+      const motherTitle = activeNoteMeta.title.slice(0, -summarySuffix.length);
+      const match = vaultIndex.notes.find((n) => n.title === motherTitle);
+      if (match) {
+        return { kind: 'mother', path: match.path, title: match.title, label: 'Full Chapter' };
+      }
+      return null;
+    }
+    const summaryTitle = `${activeNoteMeta.title}${summarySuffix}`;
+    const match = vaultIndex.notes.find((n) => n.title === summaryTitle);
+    if (match) {
+      return { kind: 'summary', path: match.path, title: match.title, label: 'Summary' };
+    }
+    return null;
+  }, [vaultIndex, activeNoteMeta]);
 
   const isBookmarked = activeNotePath ? bookmarks.includes(activeNotePath) : false;
 
@@ -988,6 +1023,27 @@ function App() {
             </div>
 
             <div className="obs-view-tools" ref={settingsRef}>
+              {/* Feature B1: Instant Summary <-> Full Chapter Flip Button */}
+              {pairedNote && (
+                <button
+                  className={`obs-pair-btn ${
+                    pairedNote.kind === 'summary' ? 'is-to-summary' : 'is-to-mother'
+                  }`}
+                  onClick={(e) => openNote(pairedNote.path, null, e.ctrlKey || e.metaKey)}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) openNote(pairedNote.path, null, true);
+                  }}
+                  title={`Open ${pairedNote.title} (Ctrl+Click for new tab)`}
+                >
+                  {pairedNote.kind === 'summary' ? (
+                    <Zap size={13} />
+                  ) : (
+                    <BookOpen size={13} />
+                  )}
+                  <span>{pairedNote.label}</span>
+                </button>
+              )}
+
               {activeNotePath && (
                 <button
                   className={`obs-icon-btn ${isBookmarked ? 'is-active' : ''}`}
@@ -1085,11 +1141,13 @@ function App() {
                 vaultIndex={vaultIndex}
                 mode="global"
                 activeNotePath={activeNotePath}
+                focusNotePath={lastOpenedNotePath}
                 onSelectNote={(path, newTab) => openNote(path, null, newTab)}
               />
             ) : (
               <Reader
                 vaultIndex={vaultIndex}
+                vaultId={activeVaultId}
                 noteData={noteData}
                 loading={loadingNote}
                 readableWidth={prefs.readableWidth}
@@ -1097,6 +1155,7 @@ function App() {
                 fetchNote={fetchNote}
                 onNavigateNote={openNote}
                 onSearchTag={handleSearchTag}
+                onActiveHeadingChange={setActiveHeadingSlug}
               />
             )}
           </div>
@@ -1108,6 +1167,7 @@ function App() {
             vaultIndex={vaultIndex}
             activeNotePath={activeNotePath}
             noteData={noteData}
+            activeHeadingSlug={activeHeadingSlug}
             rightTab={rightTab}
             setRightTab={setRightTab}
             onClose={() => setRightOpen(false)}

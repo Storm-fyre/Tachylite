@@ -3,6 +3,7 @@ import { Marked } from 'marked';
 import {
   Archive,
   ArrowDownLeft,
+  ArrowUp,
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
@@ -13,6 +14,9 @@ import {
   Tag,
 } from 'lucide-react';
 import GraphView from './GraphView.jsx';
+
+const SCROLL_STORAGE_KEY = 'obsidian-web-scroll-v1';
+const MAX_SAVED_SCROLL_ENTRIES = 120;
 
 const CALLOUT_COLORS = {
   note: '#448aff',
@@ -42,6 +46,42 @@ const CALLOUT_COLORS = {
   summary: '#00b0ff',
   tldr: '#00b0ff',
 };
+
+function loadScrollMap() {
+  try {
+    const raw = localStorage.getItem(SCROLL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveScrollPosition(storageKey, scrollTop) {
+  try {
+    const map = loadScrollMap();
+    if (scrollTop <= 12) {
+      delete map[storageKey];
+    } else {
+      delete map[storageKey];
+      map[storageKey] = Math.round(scrollTop);
+      const keys = Object.keys(map);
+      if (keys.length > MAX_SAVED_SCROLL_ENTRIES) {
+        for (let i = 0; i < keys.length - MAX_SAVED_SCROLL_ENTRIES; i++) {
+          delete map[keys[i]];
+        }
+      }
+    }
+    localStorage.setItem(SCROLL_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getSavedScrollPosition(storageKey) {
+  const map = loadScrollMap();
+  const val = map[storageKey];
+  return typeof val === 'number' && Number.isFinite(val) ? val : 0;
+}
 
 function escapeHtml(str) {
   return String(str)
@@ -204,6 +244,14 @@ function renderObsidianMarkdown(noteData, vaultNotesMap) {
         return `<h${depth} id="${escapeHtml(slug)}">${innerHtml}</h${depth}>\n`;
       },
 
+      code({ text, lang }) {
+        const cleanLang = (lang || '').trim().split(/\s+/)[0];
+        const langClass = cleanLang ? ` class="language-${escapeHtml(cleanLang)}"` : '';
+        return `<div class="obs-pre-wrap"><pre><code${langClass}>${escapeHtml(
+          text || ''
+        )}</code></pre><button type="button" class="obs-code-copy-btn" data-copy-code="true">Copy</button></div>\n`;
+      },
+
       blockquote({ tokens }) {
         const innerHtml = this.parser.parse(tokens);
         const calloutMatch = innerHtml.match(
@@ -331,6 +379,7 @@ function PropertiesBox({ properties, onSearchTag }) {
 
 export default function Reader({
   vaultIndex,
+  vaultId = null,
   noteData,
   loading,
   readableWidth,
@@ -338,12 +387,17 @@ export default function Reader({
   fetchNote,
   onNavigateNote,
   onSearchTag,
+  onActiveHeadingChange = null,
 }) {
   const scrollRef = useRef(null);
   const hoverTimerRef = useRef(null);
   const hideTimerRef = useRef(null);
+  const saveScrollTimerRef = useRef(null);
+  const lastReportedSlugRef = useRef(null);
 
   const [hoverPreview, setHoverPreview] = useState(null);
+  const [progressPct, setProgressPct] = useState(0);
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   const vaultNotesMap = useMemo(() => {
     const map = new Map();
@@ -358,40 +412,133 @@ export default function Reader({
     [noteData, vaultNotesMap]
   );
 
-  // Scroll to top on note change or jump to target heading
+  const scrollStorageKey = noteData?.path
+    ? `${vaultId || vaultIndex?.id || 'default'}::${noteData.path}`
+    : null;
+
+  const updateScrollIndicators = (container) => {
+    if (!container) return;
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (container.scrollTop / maxScroll) * 100)) : 0;
+    setProgressPct(pct);
+    setShowBackToTop(container.scrollTop > 420);
+
+    // Feature B3: Live Outline Scroll-Spy
+    if (onActiveHeadingChange) {
+      const headingEls = container.querySelectorAll(
+        '.obs-markdown h1[id], .obs-markdown h2[id], .obs-markdown h3[id], .obs-markdown h4[id], .obs-markdown h5[id], .obs-markdown h6[id]'
+      );
+      if (headingEls.length > 0) {
+        const containerTop = container.getBoundingClientRect().top;
+        const threshold = containerTop + 96;
+        let currentSlug = headingEls[0].id;
+        for (let i = 0; i < headingEls.length; i++) {
+          const rect = headingEls[i].getBoundingClientRect();
+          if (rect.top <= threshold) {
+            currentSlug = headingEls[i].id;
+          } else {
+            break;
+          }
+        }
+        if (currentSlug !== lastReportedSlugRef.current) {
+          lastReportedSlugRef.current = currentSlug;
+          onActiveHeadingChange(currentSlug);
+        }
+      } else if (lastReportedSlugRef.current !== null) {
+        lastReportedSlugRef.current = null;
+        onActiveHeadingChange(null);
+      }
+    }
+  };
+
+  // Restore saved scroll position (Feature B2) or jump to target heading on note change
   useEffect(() => {
     const container = scrollRef.current;
     if (!container || !noteData) return;
 
-    if (!targetHeading) {
-      container.scrollTop = 0;
-      return;
+    lastReportedSlugRef.current = null;
+
+    if (targetHeading) {
+      const slug = targetHeading.split('::')[0];
+      if (!slug) return;
+      const timer = setTimeout(() => {
+        const targetEl = container.querySelector(`[id="${CSS.escape(slug)}"]`);
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          targetEl.classList.remove('obs-heading-flash');
+          void targetEl.offsetWidth;
+          targetEl.classList.add('obs-heading-flash');
+        }
+        updateScrollIndicators(container);
+      }, 30);
+      return () => clearTimeout(timer);
     }
 
-    const slug = targetHeading.split('::')[0];
-    if (!slug) return;
+    const saved = scrollStorageKey ? getSavedScrollPosition(scrollStorageKey) : 0;
+    const rafId = requestAnimationFrame(() => {
+      container.scrollTop = saved;
+      updateScrollIndicators(container);
+    });
 
-    const timer = setTimeout(() => {
-      const targetEl = container.querySelector(`[id="${CSS.escape(slug)}"]`);
-      if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        targetEl.classList.remove('obs-heading-flash');
-        void targetEl.offsetWidth;
-        targetEl.classList.add('obs-heading-flash');
-      }
-    }, 30);
-
-    return () => clearTimeout(timer);
-  }, [noteData?.path, targetHeading]);
+    return () => cancelAnimationFrame(rafId);
+  }, [noteData?.path, targetHeading, scrollStorageKey]);
 
   useEffect(() => {
     return () => {
       clearTimeout(hoverTimerRef.current);
       clearTimeout(hideTimerRef.current);
+      clearTimeout(saveScrollTimerRef.current);
     };
   }, []);
 
-  const handleContentClick = (e) => {
+  const handleScroll = (e) => {
+    const container = e.currentTarget;
+    updateScrollIndicators(container);
+
+    if (scrollStorageKey) {
+      const top = container.scrollTop;
+      clearTimeout(saveScrollTimerRef.current);
+      saveScrollTimerRef.current = setTimeout(() => {
+        saveScrollPosition(scrollStorageKey, top);
+      }, 220);
+    }
+  };
+
+  const scrollToTop = () => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleContentClick = async (e) => {
+    // Feature B4: Hover Copy button on code/ASCII blocks
+    const copyBtn = e.target.closest('[data-copy-code]');
+    if (copyBtn) {
+      e.preventDefault();
+      const preWrap = copyBtn.closest('.obs-pre-wrap');
+      const codeEl = preWrap?.querySelector('pre code') || preWrap?.querySelector('pre');
+      const rawText = codeEl?.textContent || '';
+      if (rawText) {
+        try {
+          await navigator.clipboard.writeText(rawText);
+        } catch {
+          const ta = document.createElement('textarea');
+          ta.value = rawText;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        copyBtn.textContent = 'Copied ✓';
+        copyBtn.classList.add('is-copied');
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy';
+          copyBtn.classList.remove('is-copied');
+        }, 1600);
+      }
+      return;
+    }
+
     const tagBtn = e.target.closest('[data-tag]');
     if (tagBtn) {
       e.preventDefault();
@@ -500,7 +647,12 @@ export default function Reader({
 
   return (
     <>
-      <div className="obs-reader-scroll" ref={scrollRef}>
+      {/* 2px Top Reading Progress Bar (Feature B2) */}
+      <div className="obs-progress-track" aria-hidden="true">
+        <div className="obs-progress-fill" style={{ width: `${progressPct}%` }} />
+      </div>
+
+      <div className="obs-reader-scroll" ref={scrollRef} onScroll={handleScroll}>
         <article className={`obs-reader-container ${readableWidth ? 'is-readable-width' : ''}`}>
           <h1 className="obs-note-title">{noteData.title}</h1>
           <PropertiesBox properties={noteData.properties} onSearchTag={onSearchTag} />
@@ -513,6 +665,18 @@ export default function Reader({
           />
         </article>
       </div>
+
+      {/* Floating Back-to-Top Button (Feature B4) */}
+      {showBackToTop && (
+        <button
+          type="button"
+          className="obs-back-to-top"
+          onClick={scrollToTop}
+          title="Back to top"
+        >
+          <ArrowUp size={15} />
+        </button>
+      )}
 
       {hoverPreview && (
         <div
@@ -548,12 +712,14 @@ export function RightInspector({
   vaultIndex,
   activeNotePath,
   noteData,
+  activeHeadingSlug = null,
   rightTab,
   setRightTab,
   onClose,
   onNavigateNote,
   onSearchTag,
 }) {
+  const outlineListRef = useRef(null);
   const backlinks = activeNotePath ? vaultIndex.backlinks?.[activeNotePath] || [] : [];
   const outlinks = activeNotePath ? vaultIndex.outlinks?.[activeNotePath] || [] : [];
 
@@ -567,6 +733,17 @@ export function RightInspector({
     () => (headings.length ? Math.min(...headings.map((h) => h.level)) : 1),
     [headings]
   );
+
+  // Keep active outline item softly scrolled into view inside the Right Inspector
+  useEffect(() => {
+    if (rightTab !== 'outline' || !activeHeadingSlug || !outlineListRef.current) return;
+    const activeEl = outlineListRef.current.querySelector(
+      `[data-outline-slug="${CSS.escape(activeHeadingSlug)}"]`
+    );
+    if (activeEl) {
+      activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [activeHeadingSlug, rightTab]);
 
   const jumpToHeading = (slug) => {
     const el = document.querySelector(`.obs-reader-scroll [id="${CSS.escape(slug)}"]`);
@@ -640,17 +817,21 @@ export function RightInspector({
             ) : headings.length === 0 ? (
               <div className="obs-empty-hint">No headings in this note.</div>
             ) : (
-              <div className="obs-outline-list">
-                {headings.map((h, i) => (
-                  <button
-                    key={`${h.slug}-${i}`}
-                    className="obs-outline-item"
-                    style={{ paddingLeft: `${8 + (h.level - minHeadingLevel) * 13}px` }}
-                    onClick={() => jumpToHeading(h.slug)}
-                  >
-                    {h.text}
-                  </button>
-                ))}
+              <div className="obs-outline-list" ref={outlineListRef}>
+                {headings.map((h, i) => {
+                  const isActive = activeHeadingSlug === h.slug;
+                  return (
+                    <button
+                      key={`${h.slug}-${i}`}
+                      data-outline-slug={h.slug}
+                      className={`obs-outline-item ${isActive ? 'is-active' : ''}`}
+                      style={{ paddingLeft: `${8 + (h.level - minHeadingLevel) * 13}px` }}
+                      onClick={() => jumpToHeading(h.slug)}
+                    >
+                      {h.text}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </>
