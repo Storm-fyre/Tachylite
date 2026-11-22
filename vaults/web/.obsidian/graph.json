@@ -15,37 +15,58 @@
       }
     },
     {
-      "query": "path:\"Trivia\"",
+      "query": "path:\"Good to Know\"",
       "color": {
         "a": 1,
         "rgb": 16347926
       }
     },
     {
-      "query": "path:\"How Stuff Works Summary\"",
+      "query": "path:\"Civil Service/15. Support Layer\"",
+      "color": {
+        "a": 1,
+        "rgb": 2282478
+      }
+    },
+    {
+      "query": "path:\"Civil Service/1. Indian History and Culture\" OR path:\"Civil Service/2. Modern Indian History\" OR path:\"Civil Service/3. World History\" OR path:\"Civil Service/4. Geography\" OR path:\"Civil Service/5. Sociology\"",
+      "color": {
+        "a": 1,
+        "rgb": 15681391
+      }
+    },
+    {
+      "query": "path:\"Civil Service/6. Polity and Constitutional Law\" OR path:\"Civil Service/7. Governance and Public Admin\" OR path:\"Civil Service/8. International Relations\"",
+      "color": {
+        "a": 1,
+        "rgb": 3899894
+      }
+    },
+    {
+      "query": "path:\"Civil Service/9. Economy\" OR path:\"Civil Service/10. Agrarian Systems\" OR path:\"Civil Service/11. Ecology and Disaster Management\" OR path:\"Civil Service/12. Science and Strategic Technology\" OR path:\"Civil Service/13. National Security and Defense\"",
       "color": {
         "a": 1,
         "rgb": 1096065
       }
     },
     {
-      "query": "path:\"How Stuff Works\"",
+      "query": "path:\"Civil Service/14. Ethics and Moral Philosophy\"",
       "color": {
         "a": 1,
-        "rgb": 3899894
+        "rgb": 11032055
       }
     }
   ],
   "collapse-display": false,
   "showArrow": false,
-  "textFadeMultiplier": -0.5,
+  "textFadeMultiplier": -0.4,
   "nodeSizeMultiplier": 1.15,
-  "lineSizeMultiplier": 0.9,
+  "lineSizeMultiplier": 0.85,
   "collapse-forces": false,
-  "centerStrength": 0.35,
-  "repelStrength": 12.5,
-  "linkStrength": 0.9,
-  "linkDistance": 160,
-  "scale": 0.2005673532355319,
+  "centerStrength": 0.32,
+  "repelStrength": 13.5,
+  "linkStrength": 0.92,
+  "linkDistance": 155,
+  "scale": 0.1955386814331057,
   "close": false
 }
