@@ -21,6 +21,7 @@ import {
   Search,
   SlidersHorizontal,
   Sun,
+  Tag,
   X,
   Zap,
 } from 'lucide-react';
@@ -74,20 +75,17 @@ function parseHash() {
   return { vaultId, notePath: joined, isGraph: false };
 }
 
-function updateHash(vaultId, tab) {
-  if (!vaultId) {
-    window.history.replaceState(null, '', '#/');
-    return;
+function buildHash(vaultId, entry) {
+  if (!vaultId) return '#/';
+  if (!entry || entry.type === 'graph') {
+    return `#/${encodeURIComponent(vaultId)}/__graph__`;
   }
-  if (!tab || tab.type === 'graph') {
-    window.history.replaceState(null, '', `#/${encodeURIComponent(vaultId)}/__graph__`);
-    return;
-  }
-  window.history.replaceState(
-    null,
-    '',
-    `#/${encodeURIComponent(vaultId)}/${encodePathSegments(tab.path)}`
-  );
+  return `#/${encodeURIComponent(vaultId)}/${encodePathSegments(entry.path)}`;
+}
+
+function getDisplayVaultName(vaultObj, fallbackId) {
+  const raw = vaultObj?.name || fallbackId || 'Tachylite';
+  return raw.toLowerCase() === 'web' ? 'Tachylite' : raw;
 }
 
 function collectAllFolderPaths(nodes, acc = []) {
@@ -174,6 +172,7 @@ function App() {
   const [prefs, setPrefs] = useState(loadPrefs);
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickSwitcher, setShowQuickSwitcher] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
 
   const isMobileInit = typeof window !== 'undefined' && window.innerWidth <= 768;
   const [leftOpen, setLeftOpen] = useState(!isMobileInit);
@@ -192,6 +191,7 @@ function App() {
   const [targetHeading, setTargetHeading] = useState(null);
   const [activeHeadingSlug, setActiveHeadingSlug] = useState(null);
   const [lastOpenedNotePath, setLastOpenedNotePath] = useState(null);
+  const [focusRevision, setFocusRevision] = useState(0);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCorpus, setSearchCorpus] = useState(null);
@@ -201,22 +201,73 @@ function App() {
   const settingsRef = useRef(null);
   const searchInputRef = useRef(null);
 
+  // Refs for clean popstate & navigation synchronization
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+  const historyRef = useRef(history);
+  const historyIdxRef = useRef(historyIdx);
+  const vaultIndexRef = useRef(vaultIndex);
+  const activeVaultIdRef = useRef(activeVaultId);
+  const overlaysRef = useRef({});
+  const ignoreNextPopRef = useRef(false);
+
+  tabsRef.current = tabs;
+  activeTabIdRef.current = activeTabId;
+  historyRef.current = history;
+  historyIdxRef.current = historyIdx;
+  vaultIndexRef.current = vaultIndex;
+  activeVaultIdRef.current = activeVaultId;
+  overlaysRef.current = {
+    showQuickSwitcher,
+    findOpen,
+    showSettings,
+    leftOpen,
+    rightOpen,
+  };
+
   const activeTab = useMemo(
     () => tabs.find((t) => t.id === activeTabId) || null,
     [tabs, activeTabId]
   );
 
   const activeNotePath = activeTab?.type === 'note' ? activeTab.path : null;
+  const displayVaultName = useMemo(
+    () => getDisplayVaultName(vaultIndex, activeVaultId),
+    [vaultIndex, activeVaultId]
+  );
 
-  // Remember last opened note for GraphView's "Fly to Active Note" (Feature A4)
+  const activeNoteMeta = useMemo(() => {
+    if (!vaultIndex || !activeNotePath) return null;
+    return vaultIndex.notes.find((n) => n.path === activeNotePath) || null;
+  }, [vaultIndex, activeNotePath]);
+
+  // Remember last opened note for GraphView's highlight & Crosshair locate
   useEffect(() => {
     if (activeNotePath) {
       setLastOpenedNotePath(activeNotePath);
+      setFocusRevision((r) => r + 1);
+    } else {
+      setFindOpen(false);
     }
     setActiveHeadingSlug(null);
   }, [activeNotePath]);
 
-  // Apply reading preferences to document CSS variables
+  // Dynamically update browser tab title per active chapter / graph
+  useEffect(() => {
+    if (!activeVaultId || !vaultIndex) {
+      document.title = 'Tachylite';
+      return;
+    }
+    if (activeTab?.type === 'graph') {
+      document.title = `Graph view — ${displayVaultName}`;
+    } else if (activeNoteMeta) {
+      document.title = `${activeNoteMeta.title} — ${displayVaultName}`;
+    } else {
+      document.title = displayVaultName;
+    }
+  }, [activeVaultId, vaultIndex, activeTab?.type, activeNoteMeta, displayVaultName]);
+
+  // Apply reading preferences & mobile theme-color meta tag
   useEffect(() => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
@@ -232,6 +283,11 @@ function App() {
       mono: '"JetBrains Mono", "Fira Code", Consolas, Monaco, monospace',
     };
     root.style.setProperty('--reader-font-family', fontMap[prefs.fontFamily] || fontMap.sans);
+
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute('content', prefs.theme === 'light' ? '#f5f5f5' : '#1e1e1e');
+    }
   }, [prefs]);
 
   // Close reading popover when clicking outside
@@ -246,18 +302,22 @@ function App() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [showSettings]);
 
-  // Global keyboard shortcut: Ctrl/Cmd + K or Ctrl/Cmd + O for Quick Switcher
+  // Global keyboard shortcuts: Ctrl/Cmd+K/O for Quick Switcher, Ctrl/Cmd+F for In-File Find
   useEffect(() => {
     function onKeyDown(e) {
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'o')) {
         if (!vaultIndex) return;
         e.preventDefault();
         setShowQuickSwitcher((prev) => !prev);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        if (!vaultIndex || activeTab?.type !== 'note') return;
+        e.preventDefault();
+        setFindOpen(true);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [vaultIndex]);
+  }, [vaultIndex, activeTab?.type]);
 
   // Load manifest on startup
   useEffect(() => {
@@ -279,6 +339,139 @@ function App() {
       .catch((err) => setManifestError(err.message));
   }, []);
 
+  // Expand parent folders so active note is visible in File Explorer
+  const revealPathInTree = useCallback((notePath) => {
+    const parts = notePath.split('/');
+    if (parts.length <= 1) return;
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      for (let i = 1; i < parts.length; i++) {
+        next.add(parts.slice(0, i).join('/'));
+      }
+      return next;
+    });
+  }, []);
+
+  // Navigate to a history entry in-place (never spawns duplicate tabs on Back/Forward)
+  const applyNavigationEntry = useCallback(
+    (entry) => {
+      if (!entry) return;
+      setTargetHeading(null);
+      if (window.innerWidth <= 768) {
+        setLeftOpen(false);
+        setRightOpen(false);
+      }
+
+      const currentTabs = tabsRef.current;
+      const currentActive = currentTabs.find((t) => t.id === activeTabIdRef.current) || null;
+
+      if (entry.type === 'graph') {
+        const existingGraph = currentTabs.find((t) => t.type === 'graph');
+        if (existingGraph) {
+          setActiveTabId(existingGraph.id);
+        } else {
+          const graphTab = { id: 'tab-graph', type: 'graph', title: 'Graph view' };
+          setTabs((prev) => [graphTab, ...prev]);
+          setActiveTabId(graphTab.id);
+        }
+        return;
+      }
+
+      if (entry.type === 'note' && entry.path) {
+        revealPathInTree(entry.path);
+        const existing = currentTabs.find((t) => t.type === 'note' && t.path === entry.path);
+        if (existing) {
+          setActiveTabId(existing.id);
+          return;
+        }
+        // Replace the currently active note tab cleanly in-place instead of spawning extra tabs
+        if (currentActive && currentActive.type === 'note') {
+          setTabs((prev) =>
+            prev.map((t) =>
+              t.id === currentActive.id
+                ? { ...t, path: entry.path, title: entry.title }
+                : t
+            )
+          );
+          setActiveTabId(currentActive.id);
+        } else {
+          const freshTab = {
+            id: entry.id || `tab-${Date.now()}`,
+            type: 'note',
+            path: entry.path,
+            title: entry.title,
+          };
+          setTabs((prev) => [...prev, freshTab]);
+          setActiveTabId(freshTab.id);
+        }
+      }
+    },
+    [revealPathInTree]
+  );
+
+  // Unified Browser / Android Back & Forward handler
+  useEffect(() => {
+    const onPopState = (e) => {
+      if (ignoreNextPopRef.current) {
+        ignoreNextPopRef.current = false;
+        return;
+      }
+
+      const ov = overlaysRef.current;
+      const isMobile = window.innerWidth <= 768;
+
+      // On Android / browser Back: close open modals or mobile drawers FIRST before leaving current note
+      if (
+        ov.showQuickSwitcher ||
+        ov.findOpen ||
+        ov.showSettings ||
+        (isMobile && (ov.leftOpen || ov.rightOpen))
+      ) {
+        if (ov.showQuickSwitcher) setShowQuickSwitcher(false);
+        else if (ov.findOpen) setFindOpen(false);
+        else if (ov.showSettings) setShowSettings(false);
+        else {
+          setLeftOpen(false);
+          setRightOpen(false);
+        }
+        ignoreNextPopRef.current = true;
+        window.history.forward();
+        return;
+      }
+
+      const st = e.state;
+      if (st?.appNav && st.entry) {
+        if (typeof st.idx === 'number') {
+          setHistoryIdx(st.idx);
+        }
+        applyNavigationEntry(st.entry);
+        return;
+      }
+
+      // Fallback for manual URL hash edits or external back/forward states
+      const parsed = parseHash();
+      const idxData = vaultIndexRef.current;
+      if (!idxData) return;
+
+      if (parsed.isGraph) {
+        applyNavigationEntry({ id: 'tab-graph', type: 'graph', title: 'Graph view' });
+      } else if (parsed.notePath) {
+        const meta = idxData.notes.find((n) => n.path === parsed.notePath);
+        if (meta) {
+          applyNavigationEntry({
+            id: `tab-${Date.now()}`,
+            type: 'note',
+            path: meta.path,
+            title: meta.title,
+          });
+        }
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [applyNavigationEntry]);
+
   // Load selected vault index
   useEffect(() => {
     if (!activeVaultId) {
@@ -288,6 +481,7 @@ function App() {
       setNoteData(null);
       setLastOpenedNotePath(null);
       setActiveHeadingSlug(null);
+      setFindOpen(false);
       return;
     }
 
@@ -298,6 +492,7 @@ function App() {
     setSearchQuery('');
     setLastOpenedNotePath(null);
     setActiveHeadingSlug(null);
+    setFindOpen(false);
 
     try {
       const savedBm = localStorage.getItem(BOOKMARKS_PREFIX + activeVaultId);
@@ -317,26 +512,35 @@ function App() {
         setExpandedFolders(new Set());
 
         const hash = parseHash();
-        let initialTab = { id: 'tab-graph', type: 'graph', title: 'Graph view' };
+        let initialTabs = [{ id: 'tab-graph', type: 'graph', title: 'Graph view' }];
+        let initialActive = initialTabs[0];
 
         if (hash.vaultId === activeVaultId && hash.notePath) {
           const found = idx.notes.find((n) => n.path === hash.notePath);
           if (found) {
-            initialTab = {
+            const noteTab = {
               id: `tab-${Date.now()}`,
               type: 'note',
               path: found.path,
               title: found.title,
             };
+            initialTabs = [initialTabs[0], noteTab];
+            initialActive = noteTab;
+            revealPathInTree(found.path);
           }
         }
 
-        setTabs([initialTab]);
-        setActiveTabId(initialTab.id);
-        setHistory([initialTab]);
+        setTabs(initialTabs);
+        setActiveTabId(initialActive.id);
+        setHistory([initialActive]);
         setHistoryIdx(0);
-        updateHash(activeVaultId, initialTab);
-        document.title = `${idx.name} — Obsidian Web`;
+
+        const initialHash = buildHash(activeVaultId, initialActive);
+        window.history.replaceState(
+          { appNav: true, idx: 0, entry: initialActive },
+          '',
+          initialHash
+        );
       })
       .catch((err) => {
         if (!cancelled) setManifestError(err.message);
@@ -348,7 +552,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeVaultId]);
+  }, [activeVaultId, revealPathInTree]);
 
   // Fetch a note JSON payload (cached)
   const fetchNote = useCallback(
@@ -401,48 +605,53 @@ function App() {
       .catch(() => {});
   }, [activeVaultId, leftTab, searchCorpus]);
 
-  // Sync URL hash when active tab changes
-  useEffect(() => {
-    if (activeVaultId && activeTab) {
-      updateHash(activeVaultId, activeTab);
-    }
-  }, [activeVaultId, activeTab]);
+  // Push unified history entry (app history + browser pushState)
+  const pushNavigation = useCallback((entry) => {
+    const vId = activeVaultIdRef.current;
+    if (!vId || !entry) return;
 
-  // Expand parent folders so active note is visible in File Explorer
-  const revealPathInTree = useCallback((notePath) => {
-    const parts = notePath.split('/');
-    if (parts.length <= 1) return;
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      for (let i = 1; i < parts.length; i++) {
-        next.add(parts.slice(0, i).join('/'));
-      }
-      return next;
-    });
+    const currentHist = historyRef.current;
+    const currentIdx = historyIdxRef.current;
+    const currentTop = currentHist[currentIdx];
+
+    const isSameEntry =
+      currentTop &&
+      currentTop.type === entry.type &&
+      (entry.type === 'graph' || currentTop.path === entry.path);
+
+    if (isSameEntry) return;
+
+    const nextHistory = [...currentHist.slice(0, currentIdx + 1), entry];
+    const nextIdx = nextHistory.length - 1;
+
+    setHistory(nextHistory);
+    setHistoryIdx(nextIdx);
+
+    const nextHash = buildHash(vId, entry);
+    window.history.pushState({ appNav: true, idx: nextIdx, entry }, '', nextHash);
   }, []);
-
-  const pushHistoryEntry = useCallback(
-    (tabSnapshot) => {
-      setHistory((prev) => [...prev.slice(0, historyIdx + 1), tabSnapshot]);
-      setHistoryIdx((prev) => prev + 1);
-    },
-    [historyIdx]
-  );
 
   const openNote = useCallback(
     (notePath, headingSlug = null, newTab = false) => {
-      if (!vaultIndex) return;
-      const meta = vaultIndex.notes.find((n) => n.path === notePath);
+      const idxData = vaultIndexRef.current;
+      if (!idxData) return;
+      const meta = idxData.notes.find((n) => n.path === notePath);
       if (!meta) return;
 
       revealPathInTree(notePath);
       setTargetHeading(headingSlug ? `${headingSlug}::${Date.now()}` : null);
-      if (window.innerWidth <= 768) setLeftOpen(false);
+      if (window.innerWidth <= 768) {
+        setLeftOpen(false);
+        setRightOpen(false);
+      }
 
-      const existing = tabs.find((t) => t.type === 'note' && t.path === notePath);
+      const currentTabs = tabsRef.current;
+      const currentActive = currentTabs.find((t) => t.id === activeTabIdRef.current) || null;
+
+      const existing = currentTabs.find((t) => t.type === 'note' && t.path === notePath);
       if (existing && !newTab) {
         setActiveTabId(existing.id);
-        pushHistoryEntry(existing);
+        pushNavigation(existing);
         return;
       }
 
@@ -453,79 +662,112 @@ function App() {
         title: meta.title,
       };
 
-      if (newTab || !activeTab || activeTab.type === 'graph') {
+      if (newTab || !currentActive || currentActive.type === 'graph') {
         setTabs((prev) => [...prev, freshTab]);
       } else {
-        setTabs((prev) => prev.map((t) => (t.id === activeTab.id ? freshTab : t)));
+        setTabs((prev) => prev.map((t) => (t.id === currentActive.id ? freshTab : t)));
       }
       setActiveTabId(freshTab.id);
-      pushHistoryEntry(freshTab);
+      pushNavigation(freshTab);
     },
-    [vaultIndex, tabs, activeTab, revealPathInTree, pushHistoryEntry]
+    [revealPathInTree, pushNavigation]
   );
+
+  // Stable callback for GraphView so outer App re-renders never tear down canvas listeners
+  const handleGraphSelectNote = useCallback(
+    (path, newTab) => {
+      openNote(path, null, newTab);
+    },
+    [openNote]
+  );
+
+  const handleConsumeTargetHeading = useCallback(() => {
+    setTargetHeading(null);
+  }, []);
+
+  const handleCloseFind = useCallback(() => {
+    setFindOpen(false);
+  }, []);
+
+  const handleCloseRightSidebar = useCallback(() => {
+    setRightOpen(false);
+  }, []);
 
   const openGraphTab = useCallback(
     (newTab = false) => {
-      const existing = tabs.find((t) => t.type === 'graph');
+      setTargetHeading(null);
+      setFindOpen(false);
+      if (window.innerWidth <= 768) {
+        setLeftOpen(false);
+        setRightOpen(false);
+      }
+
+      const currentTabs = tabsRef.current;
+      const existing = currentTabs.find((t) => t.type === 'graph');
       if (existing && !newTab) {
         setActiveTabId(existing.id);
-        pushHistoryEntry(existing);
+        pushNavigation(existing);
         return;
       }
       const graphTab = { id: `tab-graph-${Date.now()}`, type: 'graph', title: 'Graph view' };
       setTabs((prev) => [...prev, graphTab]);
       setActiveTabId(graphTab.id);
-      pushHistoryEntry(graphTab);
+      pushNavigation(graphTab);
     },
-    [tabs, pushHistoryEntry]
+    [pushNavigation]
+  );
+
+  const selectTab = useCallback(
+    (tab) => {
+      setTargetHeading(null);
+      if (tab.type === 'graph') setFindOpen(false);
+      setActiveTabId(tab.id);
+      pushNavigation(tab);
+    },
+    [pushNavigation]
   );
 
   const closeTab = useCallback(
     (tabId, e) => {
       e?.stopPropagation();
+      setTargetHeading(null);
       setTabs((prev) => {
         if (prev.length <= 1) return prev;
         const idx = prev.findIndex((t) => t.id === tabId);
         const filtered = prev.filter((t) => t.id !== tabId);
-        if (tabId === activeTabId) {
+        if (tabId === activeTabIdRef.current) {
           const fallback = filtered[Math.max(0, idx - 1)] || filtered[0];
           setActiveTabId(fallback.id);
+          pushNavigation(fallback);
         }
         return filtered;
       });
     },
-    [activeTabId]
+    [pushNavigation]
   );
 
   const goBack = () => {
     if (historyIdx <= 0) return;
-    const prevEntry = history[historyIdx - 1];
-    setHistoryIdx(historyIdx - 1);
-    const match = tabs.find((t) =>
-      prevEntry.type === 'graph' ? t.type === 'graph' : t.path === prevEntry.path
-    );
-    if (match) {
-      setActiveTabId(match.id);
-    } else {
-      setTabs((prev) => [...prev, prevEntry]);
-      setActiveTabId(prevEntry.id);
-    }
+    window.history.back();
   };
 
   const goForward = () => {
     if (historyIdx >= history.length - 1) return;
-    const nextEntry = history[historyIdx + 1];
-    setHistoryIdx(historyIdx + 1);
-    const match = tabs.find((t) =>
-      nextEntry.type === 'graph' ? t.type === 'graph' : t.path === nextEntry.path
-    );
-    if (match) {
-      setActiveTabId(match.id);
-    } else {
-      setTabs((prev) => [...prev, nextEntry]);
-      setActiveTabId(nextEntry.id);
-    }
+    window.history.forward();
   };
+
+  const openLeftSidebar = useCallback(() => {
+    if (window.innerWidth <= 768) setRightOpen(false);
+    setLeftOpen(true);
+  }, []);
+
+  const toggleRightSidebar = useCallback(() => {
+    setRightOpen((prev) => {
+      const next = !prev;
+      if (next && window.innerWidth <= 768) setLeftOpen(false);
+      return next;
+    });
+  }, []);
 
   const toggleFolder = (folderPath) => {
     setExpandedFolders((prev) => {
@@ -561,12 +803,19 @@ function App() {
     });
   };
 
-  const handleSearchTag = (tag) => {
+  const handleSearchTag = useCallback((tag) => {
+    if (window.innerWidth <= 768) setRightOpen(false);
     setLeftOpen(true);
     setLeftTab('search');
     setSearchQuery(`#${tag}`);
     setTimeout(() => searchInputRef.current?.focus(), 50);
-  };
+  }, []);
+
+  // Sorted vault-wide tags for Left Sidebar (Macro)
+  const sortedVaultTags = useMemo(() => {
+    const entries = Object.entries(vaultIndex?.tags || {});
+    return entries.sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  }, [vaultIndex?.tags]);
 
   // Search computation
   const searchResults = useMemo(() => {
@@ -623,12 +872,7 @@ function App() {
     return results.slice(0, 60);
   }, [vaultIndex, searchQuery, searchCorpus]);
 
-  const activeNoteMeta = useMemo(() => {
-    if (!vaultIndex || !activeNotePath) return null;
-    return vaultIndex.notes.find((n) => n.path === activeNotePath) || null;
-  }, [vaultIndex, activeNotePath]);
-
-  // Feature B1: Detect Mother Chapter <-> Quick Summary counterpart automatically
+  // Detect Mother Chapter <-> Quick Summary counterpart automatically (if present)
   const pairedNote = useMemo(() => {
     if (!vaultIndex || !activeNoteMeta) return null;
     const summarySuffix = ' - Summary';
@@ -649,6 +893,9 @@ function App() {
   }, [vaultIndex, activeNoteMeta]);
 
   const isBookmarked = activeNotePath ? bookmarks.includes(activeNotePath) : false;
+  const readingMinutes = activeNoteMeta
+    ? Math.max(1, Math.round((activeNoteMeta.wordCount || 0) / 220))
+    : 0;
 
   // 1. Loading / Error / Multi-Vault Hub states
   if (manifestError) {
@@ -665,7 +912,7 @@ function App() {
   if (!manifest || loadingVault) {
     return (
       <div className="obs-vault-hub">
-        <p className="obs-vault-hub-sub">Loading vault...</p>
+        <p className="obs-vault-hub-sub">Loading Tachylite...</p>
       </div>
     );
   }
@@ -676,7 +923,7 @@ function App() {
     return (
       <div className="obs-vault-hub">
         <div className="obs-vault-hub-header">
-          <h1 className="obs-vault-hub-title">Obsidian Web Vaults</h1>
+          <h1 className="obs-vault-hub-title">Tachylite Vaults</h1>
           <p className="obs-vault-hub-sub">
             {vaultsList.length === 0
               ? 'No vaults found yet. Place your Obsidian vault folder inside vaults/ and push to GitHub.'
@@ -691,7 +938,7 @@ function App() {
                 className="obs-vault-card"
                 onClick={() => setActiveVaultId(v.id)}
               >
-                <div className="obs-vault-card-name">{v.name}</div>
+                <div className="obs-vault-card-name">{getDisplayVaultName(v, v.id)}</div>
                 <div className="obs-vault-card-meta">
                   {v.noteCount} notes · {v.assetCount} attachments
                 </div>
@@ -719,7 +966,7 @@ function App() {
           />
         )}
 
-        {/* LEFT SIDEBAR */}
+        {/* LEFT SIDEBAR (Vault-Wide / Macro: Files, Search, Bookmarks, Tags) */}
         {leftOpen && (
           <aside className="obs-sidebar obs-sidebar--left">
             <div className="obs-sidebar-tabs">
@@ -737,7 +984,7 @@ function App() {
                     setLeftTab('search');
                     setTimeout(() => searchInputRef.current?.focus(), 40);
                   }}
-                  title="Search"
+                  title="Search all notes"
                 >
                   <Search size={15} />
                 </button>
@@ -747,6 +994,13 @@ function App() {
                   title="Bookmarks"
                 >
                   <Bookmark size={15} />
+                </button>
+                <button
+                  className={`obs-icon-btn ${leftTab === 'tags' ? 'is-active' : ''}`}
+                  onClick={() => setLeftTab('tags')}
+                  title="All vault tags"
+                >
+                  <Tag size={15} />
                 </button>
               </div>
               <button
@@ -817,7 +1071,7 @@ function App() {
                   <input
                     ref={searchInputRef}
                     className="obs-search-input"
-                    placeholder="Search notes or #tag..."
+                    placeholder="Search all notes or #tag..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -910,6 +1164,29 @@ function App() {
                 )}
               </div>
             )}
+
+            {leftTab === 'tags' && (
+              <div className="obs-sidebar-body">
+                <div className="obs-sidebar-heading">Vault Tags ({sortedVaultTags.length})</div>
+                {sortedVaultTags.length === 0 ? (
+                  <div className="obs-empty-hint">No tags found in this vault.</div>
+                ) : (
+                  sortedVaultTags.map(([tag, paths]) => (
+                    <div
+                      key={tag}
+                      className="obs-tree-row"
+                      style={{ justifyContent: 'space-between' }}
+                      onClick={() => handleSearchTag(tag)}
+                    >
+                      <span className="obs-tree-label" style={{ color: 'var(--text-accent)' }}>
+                        #{tag}
+                      </span>
+                      <span className="obs-backlink-badge">{paths.length}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </aside>
         )}
 
@@ -922,7 +1199,7 @@ function App() {
                 <button
                   className="obs-icon-btn"
                   style={{ marginBottom: 4 }}
-                  onClick={() => setLeftOpen(true)}
+                  onClick={openLeftSidebar}
                   title="Expand left sidebar"
                 >
                   <PanelLeft size={15} />
@@ -934,7 +1211,16 @@ function App() {
                   <div
                     key={tab.id}
                     className={`obs-tab ${tab.id === activeTabId ? 'is-active' : ''}`}
-                    onClick={() => setActiveTabId(tab.id)}
+                    onClick={() => selectTab(tab)}
+                    onMouseDown={(e) => {
+                      if (e.button === 1) e.preventDefault();
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1 && tabs.length > 1) {
+                        e.preventDefault();
+                        closeTab(tab.id, e);
+                      }
+                    }}
                     title={tab.path || tab.title}
                   >
                     {tab.type === 'graph' ? (
@@ -966,16 +1252,18 @@ function App() {
             </div>
 
             <div className="obs-tab-actions">
-              <button
-                className="obs-icon-btn"
-                onClick={() => openGraphTab(false)}
-                title="Open graph view"
-              >
-                <GitFork size={15} />
-              </button>
+              {activeTab?.type === 'note' && (
+                <button
+                  className={`obs-icon-btn ${findOpen ? 'is-active' : ''}`}
+                  onClick={() => setFindOpen((f) => !f)}
+                  title="Find in this file (Ctrl+F)"
+                >
+                  <Search size={15} />
+                </button>
+              )}
               <button
                 className={`obs-icon-btn ${rightOpen ? 'is-active' : ''}`}
-                onClick={() => setRightOpen((o) => !o)}
+                onClick={toggleRightSidebar}
                 title="Toggle right sidebar"
               >
                 <PanelRight size={15} />
@@ -1023,7 +1311,6 @@ function App() {
             </div>
 
             <div className="obs-view-tools" ref={settingsRef}>
-              {/* Feature B1: Instant Summary <-> Full Chapter Flip Button */}
               {pairedNote && (
                 <button
                   className={`obs-pair-btn ${
@@ -1134,34 +1421,47 @@ function App() {
             </div>
           </div>
 
-          {/* Active Pane Content */}
+          {/* Active Pane Content (Global Graph stays mounted across tab switches) */}
           <div className="obs-pane-content">
-            {activeTab?.type === 'graph' && vaultIndex ? (
-              <GraphView
-                vaultIndex={vaultIndex}
-                mode="global"
-                activeNotePath={activeNotePath}
-                focusNotePath={lastOpenedNotePath}
-                onSelectNote={(path, newTab) => openNote(path, null, newTab)}
-              />
-            ) : (
-              <Reader
-                vaultIndex={vaultIndex}
-                vaultId={activeVaultId}
-                noteData={noteData}
-                loading={loadingNote}
-                readableWidth={prefs.readableWidth}
-                targetHeading={targetHeading}
-                fetchNote={fetchNote}
-                onNavigateNote={openNote}
-                onSearchTag={handleSearchTag}
-                onActiveHeadingChange={setActiveHeadingSlug}
-              />
+            {vaultIndex && (
+              <div
+                className={`obs-pane-layer ${activeTab?.type === 'graph' ? '' : 'is-hidden'}`}
+              >
+                <GraphView
+                  vaultIndex={vaultIndex}
+                  mode="global"
+                  isVisible={activeTab?.type === 'graph'}
+                  activeNotePath={activeNotePath}
+                  focusNotePath={lastOpenedNotePath}
+                  focusRevision={focusRevision}
+                  onSelectNote={handleGraphSelectNote}
+                />
+              </div>
+            )}
+
+            {activeTab?.type !== 'graph' && (
+              <div className="obs-pane-layer">
+                <Reader
+                  vaultIndex={vaultIndex}
+                  vaultId={activeVaultId}
+                  noteData={noteData}
+                  loading={loadingNote}
+                  readableWidth={prefs.readableWidth}
+                  targetHeading={targetHeading}
+                  onConsumeTargetHeading={handleConsumeTargetHeading}
+                  findOpen={findOpen}
+                  onCloseFind={handleCloseFind}
+                  fetchNote={fetchNote}
+                  onNavigateNote={openNote}
+                  onSearchTag={handleSearchTag}
+                  onActiveHeadingChange={setActiveHeadingSlug}
+                />
+              </div>
             )}
           </div>
         </main>
 
-        {/* RIGHT SIDEBAR INSPECTOR */}
+        {/* RIGHT SIDEBAR INSPECTOR (Current Chapter / Micro: Outline, Backlinks, Outgoing, Local Graph) */}
         {rightOpen && vaultIndex && (
           <RightInspector
             vaultIndex={vaultIndex}
@@ -1170,9 +1470,8 @@ function App() {
             activeHeadingSlug={activeHeadingSlug}
             rightTab={rightTab}
             setRightTab={setRightTab}
-            onClose={() => setRightOpen(false)}
+            onClose={handleCloseRightSidebar}
             onNavigateNote={openNote}
-            onSearchTag={handleSearchTag}
           />
         )}
       </div>
@@ -1185,7 +1484,7 @@ function App() {
             onClick={() => {
               if (vaultsList.length > 1) {
                 setActiveVaultId(null);
-                updateHash(null, null);
+                window.history.replaceState(null, '', '#/');
               } else {
                 setShowQuickSwitcher(true);
               }
@@ -1193,11 +1492,11 @@ function App() {
             title={
               vaultsList.length > 1
                 ? 'Switch vault'
-                : `${vaultIndex?.name || activeVaultId} (${vaultIndex?.notes.length || 0} notes)`
+                : `${displayVaultName} (${vaultIndex?.notes.length || 0} notes)`
             }
           >
             <ChevronsUpDown size={12} />
-            <span>{vaultIndex?.name || activeVaultId}</span>
+            <span>{displayVaultName}</span>
           </button>
         </div>
 
@@ -1207,6 +1506,7 @@ function App() {
               <button
                 className="obs-status-btn"
                 onClick={() => {
+                  if (window.innerWidth <= 768) setLeftOpen(false);
                   setRightOpen(true);
                   setRightTab('backlinks');
                 }}
@@ -1217,6 +1517,7 @@ function App() {
               <button
                 className="obs-status-btn"
                 onClick={() => {
+                  if (window.innerWidth <= 768) setLeftOpen(false);
                   setRightOpen(true);
                   setRightTab('outline');
                 }}
@@ -1224,8 +1525,13 @@ function App() {
               >
                 Outline
               </button>
-              <span>{activeNoteMeta.wordCount.toLocaleString()} words</span>
-              <span>{activeNoteMeta.charCount.toLocaleString()} characters</span>
+              <span>~{readingMinutes} min read</span>
+              <span className="obs-status-words">
+                {activeNoteMeta.wordCount.toLocaleString()} words
+              </span>
+              <span className="obs-status-chars">
+                {activeNoteMeta.charCount.toLocaleString()} characters
+              </span>
             </>
           ) : (
             <span>{vaultIndex?.notes.length || 0} notes in graph</span>

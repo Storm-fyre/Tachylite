@@ -7,7 +7,16 @@ import {
   forceX,
   forceY,
 } from 'd3-force';
-import { Crosshair, Eye, EyeOff, Maximize2, Settings, Sparkles, X } from 'lucide-react';
+import {
+  Crosshair,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Settings,
+  Sparkles,
+  X,
+} from 'lucide-react';
 
 function matchesSingleTerm(node, term) {
   const clean = term.trim();
@@ -348,21 +357,6 @@ function makeEdgePairKey(a, b) {
   return a < b ? `${a}||${b}` : `${b}||${a}`;
 }
 
-function computeLockNeighborhood(primaryId, depth, neighborMap) {
-  const deg1 = new Set(neighborMap.get(primaryId) || []);
-  const deg2 = new Set();
-  if (depth >= 2) {
-    for (const n1 of deg1) {
-      for (const n2 of neighborMap.get(n1) || []) {
-        if (n2 !== primaryId && !deg1.has(n2)) {
-          deg2.add(n2);
-        }
-      }
-    }
-  }
-  return { deg1, deg2 };
-}
-
 function findShortestPath(startId, endId, neighborMap) {
   if (startId === endId) return [startId];
   const visited = new Set([startId]);
@@ -394,8 +388,10 @@ function findShortestPath(startId, endId, neighborMap) {
 export default function GraphView({
   vaultIndex,
   mode = 'global',
+  isVisible = true,
   activeNotePath = null,
   focusNotePath = null,
+  focusRevision = 0,
   onSelectNote,
 }) {
   const wrapRef = useRef(null);
@@ -420,17 +416,25 @@ export default function GraphView({
   const [panelOpen, setPanelOpen] = useState(false);
   const [themeColors, setThemeColors] = useState(getThemeColors);
 
-  // Feature A5: Interactive Color Group Controls (solo highlight or hide layer)
+  // Interactive Color Group Controls (solo highlight or hide layer)
   const [hiddenGroups, setHiddenGroups] = useState(() => new Set());
   const [soloGroupIdx, setSoloGroupIdx] = useState(null);
 
-  // Feature A1/A2/A3 subtle bottom status pill
+  // Subtle bottom status pill (lock or shortest-path clickable hop trail)
   const [statusPill, setStatusPill] = useState(null);
 
-  // Feature A6: Alt + Hover quick note peek card
-  const [peekCard, setPeekCard] = useState(null);
+  // Pinned interactive Quick Peek card (2nd two-finger tap / 2nd long-press on locked node)
+  const [pinnedPeek, setPinnedPeek] = useState(null);
 
-  const effectiveFocusPath = focusNotePath || activeNotePath;
+  // Alt + Hover passive quick peek card (desktop)
+  const [hoverPeek, setHoverPeek] = useState(null);
+
+  // Double-tap empty space dismisses visual highlight while keeping Crosshair locate working
+  const [focusDismissed, setFocusDismissed] = useState(false);
+
+  const locateTargetPath = focusNotePath || activeNotePath;
+  const visualFocusPath =
+    mode === 'global' && focusDismissed ? activeNotePath || null : locateTargetPath;
 
   const notesByPathMap = useMemo(() => {
     const map = new Map();
@@ -439,6 +443,11 @@ export default function GraphView({
     }
     return map;
   }, [vaultIndex]);
+
+  // Re-enable visual highlight whenever a note is newly opened/viewed
+  useEffect(() => {
+    setFocusDismissed(false);
+  }, [focusNotePath, focusRevision]);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -455,6 +464,10 @@ export default function GraphView({
     const cfg = vaultIndex?.graphConfig || {};
     setHiddenGroups(new Set());
     setSoloGroupIdx(null);
+    setPinnedPeek(null);
+    setStatusPill(null);
+    setFocusDismissed(false);
+    hasFittedRef.current = false;
     setSettings((prev) => ({
       ...prev,
       search: cfg.search || '',
@@ -483,7 +496,6 @@ export default function GraphView({
       if (mode === 'global' && settings.search.trim() && !matchesGraphQuery(n, settings.search)) {
         return false;
       }
-      // Hide nodes whose primary color group is toggled hidden
       if (mode === 'global' && hiddenGroups.size > 0 && !n.unresolved) {
         for (let gi = 0; gi < colorGroups.length; gi++) {
           const grp = colorGroups[gi];
@@ -609,17 +621,17 @@ export default function GraphView({
   const neighborMapRef = useRef(new Map());
   const cameraRef = useRef({ x: 0, y: 0, k: 0.3 });
   const overviewScaleRef = useRef(0.3);
+  const hasFittedRef = useRef(false);
 
-  // Hover + Right-Click Lock + Shortest-Path + Fly-To refs
+  // Hover + Right-Click Lock + Pinned Peek + Shortest-Path + Fly-To refs
   const hoveredNodeRef = useRef(null);
   const spotlightNodeRef = useRef(null);
   const hoverBlendRef = useRef(0);
   const hoverRafRef = useRef(null);
 
   const lockedNodeRef = useRef(null);
-  const lockDepthRef = useRef(1);
   const lockDeg1Ref = useRef(new Set());
-  const lockDeg2Ref = useRef(new Set());
+  const pinnedPeekRef = useRef(null);
 
   const pathStartRef = useRef(null);
   const pathNodesRef = useRef(new Set());
@@ -631,22 +643,29 @@ export default function GraphView({
   const pulseRafRef = useRef(null);
   const altKeyRef = useRef(false);
   const lastCursorRef = useRef({ x: 0, y: 0 });
+  const lastEmptyTapRef = useRef({ time: 0, x: 0, y: 0 });
 
   const draggedNodeRef = useRef(null);
   const drawRef = useRef(() => {});
   const settingsRef = useRef(settings);
   const themeRef = useRef(themeColors);
-  const activeNoteRef = useRef(effectiveFocusPath);
+  const activeNoteRef = useRef(visualFocusPath);
+  const locateTargetRef = useRef(locateTargetPath);
   const notesByPathRef = useRef(notesByPathMap);
+  const onSelectNoteRef = useRef(onSelectNote);
+  const isVisibleRef = useRef(isVisible);
 
   settingsRef.current = settings;
   themeRef.current = themeColors;
-  activeNoteRef.current = effectiveFocusPath;
+  activeNoteRef.current = visualFocusPath;
+  locateTargetRef.current = locateTargetPath;
   soloGroupIdxRef.current = soloGroupIdx;
   notesByPathRef.current = notesByPathMap;
+  onSelectNoteRef.current = onSelectNote;
+  isVisibleRef.current = isVisible;
+  pinnedPeekRef.current = pinnedPeek;
 
-  // Razor-sharp native Obsidian pinpoint radii at overview (~1.5px leaves, ~2.3px chapters,
-  // ~3.0px Trivia, ~4.3px Gold Hubs), growing smoothly as you zoom into a cluster.
+  // Razor-sharp native Obsidian pinpoint radii (UNCHANGED)
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
     const relZoom =
@@ -663,10 +682,10 @@ export default function GraphView({
   };
 
   const clearAllModes = useCallback(() => {
+    pinnedPeekRef.current = null;
+    setPinnedPeek(null);
     lockedNodeRef.current = null;
-    lockDepthRef.current = 1;
     lockDeg1Ref.current = new Set();
-    lockDeg2Ref.current = new Set();
     pathStartRef.current = null;
     pathNodesRef.current = new Set();
     pathEdgesRef.current = new Set();
@@ -679,13 +698,13 @@ export default function GraphView({
     drawRef.current();
   }, []);
 
-  const fitViewToNodes = () => {
+  const fitViewToNodes = useCallback(() => {
     const canvas = canvasRef.current;
     const nodes = nodesRef.current;
-    if (!canvas || nodes.length === 0) return;
+    if (!canvas || nodes.length === 0) return false;
 
     const rect = canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
+    if (!rect.width || !rect.height) return false;
 
     let minX = Infinity;
     let maxX = -Infinity;
@@ -700,7 +719,7 @@ export default function GraphView({
       if (n.y > maxY) maxY = n.y;
     }
 
-    if (!Number.isFinite(minX)) return;
+    if (!Number.isFinite(minX)) return false;
 
     const spanX = Math.max(200, maxX - minX);
     const spanY = Math.max(200, maxY - minY);
@@ -727,10 +746,12 @@ export default function GraphView({
       x: rect.width / 2 - cx * k,
       y: rect.height / 2 - cy * k,
     };
+    hasFittedRef.current = true;
     drawRef.current();
-  };
+    return true;
+  }, [mode]);
 
-  // Feature A4: Smooth camera glide & pulse ring to locate active/last-read note
+  // Smooth camera glide & pulse ring to locate active/last-read note
   const flyToNote = useCallback((targetPath) => {
     const canvas = canvasRef.current;
     if (!canvas || !targetPath) return;
@@ -739,6 +760,10 @@ export default function GraphView({
 
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
+
+    // Re-show visual highlight when user explicitly clicks Crosshair / presses F
+    setFocusDismissed(false);
+    activeNoteRef.current = targetPath;
 
     if (flyRafRef.current) cancelAnimationFrame(flyRafRef.current);
     if (pulseRafRef.current) cancelAnimationFrame(pulseRafRef.current);
@@ -769,7 +794,6 @@ export default function GraphView({
 
     flyRafRef.current = requestAnimationFrame(animateCamera);
 
-    // Subtle expanding radar pulse on target node
     const pulseStart = performance.now();
     const pulseDuration = 1200;
     pulseRef.current = { nodeId: targetNode.id, progress: 0 };
@@ -790,17 +814,32 @@ export default function GraphView({
     pulseRafRef.current = requestAnimationFrame(animatePulse);
   }, []);
 
-  // Keyboard shortcuts: Esc clears lock/path/solo; F flies to active note; Alt toggles peek
+  // When switching back to kept-alive Graph tab, fit once if never fitted yet, else redraw exact view
+  useEffect(() => {
+    if (!isVisible) return;
+    const rafId = requestAnimationFrame(() => {
+      if (!hasFittedRef.current) {
+        fitViewToNodes();
+      } else {
+        drawRef.current();
+      }
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isVisible, fitViewToNodes]);
+
+  // Keyboard shortcuts: Esc steps back/clears; F flies to active note; Alt toggles passive peek
   useEffect(() => {
     const onKeyDown = (e) => {
+      if (!isVisibleRef.current) return;
+
       if (e.key === 'Alt') {
         altKeyRef.current = true;
         const h = hoveredNodeRef.current;
-        if (mode === 'global' && h && !h.unresolved) {
+        if (mode === 'global' && h && !h.unresolved && !pinnedPeekRef.current) {
           const meta = notesByPathRef.current.get(h.path);
           if (meta) {
             const { x, y } = lastCursorRef.current;
-            setPeekCard({
+            setHoverPeek({
               title: meta.title,
               folder: meta.folder,
               wordCount: meta.wordCount,
@@ -818,7 +857,29 @@ export default function GraphView({
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (e.key === 'Escape') {
-        clearAllModes();
+        if (pinnedPeekRef.current) {
+          pinnedPeekRef.current = null;
+          setPinnedPeek(null);
+          if (lockedNodeRef.current) {
+            const locked = lockedNodeRef.current;
+            const deg1 = lockDeg1Ref.current;
+            setStatusPill({
+              kind: 'lock',
+              text: `Locked: ${locked.title} · ${deg1.size} connected`,
+              hint: 'Right-click again for quick preview',
+            });
+          }
+        } else if (
+          lockedNodeRef.current ||
+          pathNodesRef.current.size > 0 ||
+          soloGroupIdxRef.current !== null
+        ) {
+          clearAllModes();
+        } else if (mode === 'global' && activeNoteRef.current) {
+          setFocusDismissed(true);
+          activeNoteRef.current = null;
+          drawRef.current();
+        }
       } else if (
         mode === 'global' &&
         e.key.toLowerCase() === 'f' &&
@@ -826,9 +887,9 @@ export default function GraphView({
         !e.metaKey &&
         !e.altKey
       ) {
-        if (activeNoteRef.current) {
+        if (locateTargetRef.current) {
           e.preventDefault();
-          flyToNote(activeNoteRef.current);
+          flyToNote(locateTargetRef.current);
         }
       }
     };
@@ -836,13 +897,13 @@ export default function GraphView({
     const onKeyUp = (e) => {
       if (e.key === 'Alt') {
         altKeyRef.current = false;
-        setPeekCard(null);
+        setHoverPeek(null);
       }
     };
 
     const onBlur = () => {
       altKeyRef.current = false;
-      setPeekCard(null);
+      setHoverPeek(null);
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -892,17 +953,12 @@ export default function GraphView({
       const stillPresent = nodes.find((n) => n.id === lockedNodeRef.current.id);
       if (stillPresent) {
         lockedNodeRef.current = stillPresent;
-        const { deg1, deg2 } = computeLockNeighborhood(
-          stillPresent.id,
-          lockDepthRef.current,
-          neighborMap
-        );
-        lockDeg1Ref.current = deg1;
-        lockDeg2Ref.current = deg2;
+        lockDeg1Ref.current = new Set(neighborMap.get(stillPresent.id) || []);
       } else {
         lockedNodeRef.current = null;
         lockDeg1Ref.current = new Set();
-        lockDeg2Ref.current = new Set();
+        pinnedPeekRef.current = null;
+        setPinnedPeek(null);
         setStatusPill(null);
       }
     }
@@ -946,7 +1002,7 @@ export default function GraphView({
     return () => {
       sim.stop();
     };
-  }, [graphData, mode]);
+  }, [graphData, mode, fitViewToNodes]);
 
   useEffect(() => {
     const sim = simRef.current;
@@ -989,11 +1045,12 @@ export default function GraphView({
     settings.lineSizeMultiplier,
     settings.textFadeMultiplier,
     settings.showArrow,
-    effectiveFocusPath,
+    visualFocusPath,
     soloGroupIdx,
   ]);
 
   // Smooth 140ms hover/lock spotlight animation + Canvas renderer + full interaction handlers
+  // Note: uses onSelectNoteRef so outer App re-renders NEVER tear down listeners or cancel animations.
   useEffect(() => {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
@@ -1005,7 +1062,6 @@ export default function GraphView({
       if (!locked) return false;
       if (nodeId === locked.id) return true;
       if (lockDeg1Ref.current.has(nodeId)) return true;
-      if (lockDepthRef.current >= 2 && lockDeg2Ref.current.has(nodeId)) return true;
       return false;
     };
 
@@ -1015,7 +1071,6 @@ export default function GraphView({
       }
       hoveredNodeRef.current = nextNode;
 
-      // While a node is right-click locked, never drop the locked spotlight blend
       if (lockedNodeRef.current) {
         hoverBlendRef.current = 1;
         draw();
@@ -1058,35 +1113,101 @@ export default function GraphView({
       hoverRafRef.current = requestAnimationFrame(step);
     };
 
-    const engageLock = (node, depth = 1) => {
-      // Clear any shortest-path tracer & solo group when locking a node
+    const openPinnedPeek = (node, isTouchInput = false) => {
+      if (!node || node.unresolved) return;
+      const meta = notesByPathRef.current.get(node.path);
+      if (!meta) return;
+
+      const rect = wrap.getBoundingClientRect();
+      const cam = cameraRef.current;
+      const sx = node.x * cam.k + cam.x;
+      const sy = node.y * cam.k + cam.y;
+
+      const cardW = Math.min(335, rect.width - 24);
+      const cardH = 235;
+      let left = sx + 18;
+      if (left + cardW > rect.width - 12) {
+        left = sx - cardW - 18;
+      }
+      left = Math.max(12, Math.min(rect.width - cardW - 12, left));
+
+      let top = sy - 36;
+      if (top + cardH > rect.height - 56) {
+        top = rect.height - cardH - 56;
+      }
+      top = Math.max(12, top);
+
+      const paper = meta.properties?.paper ? String(meta.properties.paper) : null;
+      const peekObj = {
+        id: node.id,
+        path: meta.path,
+        title: meta.title,
+        folder: meta.folder,
+        paper,
+        tags: (meta.tags || []).slice(0, 5),
+        wordCount: meta.wordCount || 0,
+        degree: node.degree || 0,
+        excerpt: meta.excerpt || '',
+        left,
+        top,
+      };
+      pinnedPeekRef.current = peekObj;
+      setPinnedPeek(peekObj);
+      setHoverPeek(null);
+
+      setStatusPill({
+        kind: 'lock',
+        text: `Preview: ${node.title} · ${lockDeg1Ref.current.size} connected`,
+        hint: isTouchInput
+          ? 'Tap empty space to hide preview'
+          : 'Click empty space to hide preview',
+      });
+    };
+
+    const closePinnedPeekOnly = (isTouchInput = false) => {
+      pinnedPeekRef.current = null;
+      setPinnedPeek(null);
+      const locked = lockedNodeRef.current;
+      if (locked) {
+        setStatusPill({
+          kind: 'lock',
+          text: `Locked: ${locked.title} · ${lockDeg1Ref.current.size} connected`,
+          hint: isTouchInput
+            ? 'Long-press again to preview · Tap empty to unlock'
+            : 'Right-click again to preview · Click empty to unlock',
+        });
+      }
+    };
+
+    const engageLock = (node, isTouchInput = false) => {
       pathStartRef.current = null;
       pathNodesRef.current = new Set();
       pathEdgesRef.current = new Set();
+      pinnedPeekRef.current = null;
+      setPinnedPeek(null);
       setSoloGroupIdx(null);
 
       lockedNodeRef.current = node;
-      lockDepthRef.current = depth;
-      const { deg1, deg2 } = computeLockNeighborhood(node.id, depth, neighborMapRef.current);
+      const deg1 = new Set(neighborMapRef.current.get(node.id) || []);
       lockDeg1Ref.current = deg1;
-      lockDeg2Ref.current = deg2;
       spotlightNodeRef.current = node;
       hoverBlendRef.current = 1;
 
-      const totalConnected = deg1.size + (depth >= 2 ? deg2.size : 0);
       setStatusPill({
         kind: 'lock',
-        text: `Locked: ${node.title} · ${depth === 1 ? '1st' : '2nd'} degree (${totalConnected} connected)`,
-        hint: depth === 1 ? 'Right-click again for 2nd degree' : 'Right-click again for 1st degree',
+        text: `Locked: ${node.title} · ${deg1.size} connected`,
+        hint: isTouchInput
+          ? 'Long-press again to preview'
+          : 'Right-click again to preview',
       });
       draw();
     };
 
     const releaseLock = () => {
+      pinnedPeekRef.current = null;
+      setPinnedPeek(null);
       lockedNodeRef.current = null;
-      lockDepthRef.current = 1;
       lockDeg1Ref.current = new Set();
-      lockDeg2Ref.current = new Set();
       setStatusPill(null);
       startHoverTransition(null);
     };
@@ -1097,6 +1218,23 @@ export default function GraphView({
       pathEdgesRef.current = new Set();
       setStatusPill(null);
       draw();
+    };
+
+    const handleEmptySpaceTapForDoubleTap = (clientX, clientY) => {
+      if (mode !== 'global') return;
+      const now = performance.now();
+      const prev = lastEmptyTapRef.current;
+      const dist = Math.hypot(clientX - prev.x, clientY - prev.y);
+      if (now - prev.time < 380 && dist < 40) {
+        lastEmptyTapRef.current = { time: 0, x: 0, y: 0 };
+        if (activeNoteRef.current) {
+          setFocusDismissed(true);
+          activeNoteRef.current = null;
+          draw();
+        }
+      } else {
+        lastEmptyTapRef.current = { time: now, x: clientX, y: clientY };
+      }
     };
 
     const draw = () => {
@@ -1120,12 +1258,10 @@ export default function GraphView({
       const activePath = activeNoteRef.current;
       const hovered = hoveredNodeRef.current;
 
-      // Determine active highlight mode cleanly (Path > Lock > SoloGroup > Hover)
+      // Active highlight priority: Path > Lock > SoloGroup > Hover
       const hasPath = pathNodesRef.current.size > 0;
       const locked = !hasPath ? lockedNodeRef.current : null;
-      const lockDepth = lockDepthRef.current;
       const lockDeg1 = lockDeg1Ref.current;
-      const lockDeg2 = lockDeg2Ref.current;
       const soloGroup = !hasPath && !locked ? soloGroupIdxRef.current : null;
 
       const blend = locked ? 1 : hoverBlendRef.current;
@@ -1148,7 +1284,6 @@ export default function GraphView({
           ? 1.4
           : cam.k / Math.max(0.04, overviewScaleRef.current);
 
-      // Silky hairline edges at overview, gently fuller when zoomed in
       const zoomLineScale = Math.min(1.7, Math.max(0.85, Math.pow(Math.max(0.5, relZoom), 0.24)));
       const baseLineWidth = Math.max(0.4, 0.56 * (cfg.lineSizeMultiplier || 1) * zoomLineScale);
 
@@ -1188,19 +1323,9 @@ export default function GraphView({
           }
         } else if (locked) {
           const isDeg1Edge = s.id === locked.id || t.id === locked.id;
-          const isDeg2Edge =
-            lockDepth >= 2 &&
-            !isDeg1Edge &&
-            ((lockDeg1.has(s.id) && (lockDeg1.has(t.id) || lockDeg2.has(t.id))) ||
-              (lockDeg1.has(t.id) && lockDeg2.has(s.id)));
-
           if (isDeg1Edge) {
             alpha = 0.94;
             lineWidth = baseLineWidth * 1.75;
-            stroke = colors.lineActive;
-          } else if (isDeg2Edge) {
-            alpha = 0.56;
-            lineWidth = baseLineWidth * 1.25;
             stroke = colors.lineActive;
           } else {
             alpha = baseAlpha * 0.12;
@@ -1292,7 +1417,6 @@ export default function GraphView({
         } else if (locked) {
           const isPrimary = n.id === locked.id;
           const isDeg1 = lockDeg1.has(n.id);
-          const isDeg2 = lockDepth >= 2 && lockDeg2.has(n.id);
 
           if (isPrimary) {
             drawR = r * 1.32;
@@ -1300,10 +1424,6 @@ export default function GraphView({
           } else if (isDeg1) {
             drawR = isHovered ? r * 1.28 : r;
             ringAlpha = isHovered ? 0.9 : 0;
-          } else if (isDeg2) {
-            nodeAlpha = isHovered ? 1 : 0.85;
-            drawR = isHovered ? r * 1.24 : r;
-            ringAlpha = isHovered ? 0.85 : 0;
           } else {
             nodeAlpha = 0.15;
           }
@@ -1347,7 +1467,7 @@ export default function GraphView({
           ctx.stroke();
         }
 
-        // Expanding radar pulse ring when locating active note via Fly-To (A4)
+        // Expanding radar pulse ring when locating active note via Fly-To
         if (pulseRef.current && pulseRef.current.nodeId === n.id) {
           const pp = pulseRef.current.progress;
           const ringR = drawR + 4 + pp * 28;
@@ -1362,7 +1482,7 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 3. True Obsidian text-fade threshold (UNCHANGED) + Lock/Path label visibility
+      // 3. True Obsidian text-fade threshold (UNCHANGED)
       const fadeShift = Math.pow(1.42, cfg.textFadeMultiplier || 0);
       const baseStartZoom = 1.85 * fadeShift;
       const fadeSpan = 1.15 * fadeShift;
@@ -1410,16 +1530,11 @@ export default function GraphView({
         } else if (locked) {
           const isPrimary = n.id === locked.id;
           const isDeg1 = lockDeg1.has(n.id);
-          const isDeg2 = lockDepth >= 2 && lockDeg2.has(n.id);
           if (isPrimary) {
             alpha = 1;
             isFocal = true;
           } else if (isDeg1) {
             alpha = isHovered ? 1 : Math.max(alpha, relZoom > 1.25 ? 0.85 : 0.55);
-            isFocal = isHovered;
-            isBoostedNeighbor = true;
-          } else if (isDeg2) {
-            alpha = isHovered ? 1 : Math.max(alpha, relZoom > 1.5 ? 0.65 : 0.32);
             isFocal = isHovered;
             isBoostedNeighbor = true;
           } else {
@@ -1546,7 +1661,14 @@ export default function GraphView({
     drawRef.current = draw;
     draw();
 
-    const resizeObs = new ResizeObserver(() => draw());
+    const resizeObs = new ResizeObserver(() => {
+      if (!isVisibleRef.current) return;
+      if (!hasFittedRef.current && nodesRef.current.length > 0) {
+        fitViewToNodes();
+      } else {
+        draw();
+      }
+    });
     resizeObs.observe(wrap);
 
     const hitTestNode = (clientX, clientY, isTouch = false) => {
@@ -1584,7 +1706,7 @@ export default function GraphView({
     let longPressTimer = null;
     let isLongPress = false;
     let touchTargetNode = null;
-    let pendingUnlockOnClick = false;
+    let pendingDismissAction = null; // 'peek' | 'unlock' | 'path' | null
 
     const clearLongPressTimer = () => {
       if (longPressTimer) {
@@ -1594,15 +1716,13 @@ export default function GraphView({
     };
 
     const handleShiftPathClick = (hit) => {
-      // Clear lock/solo when starting path tracer
+      pinnedPeekRef.current = null;
+      setPinnedPeek(null);
       lockedNodeRef.current = null;
-      lockDepthRef.current = 1;
       lockDeg1Ref.current = new Set();
-      lockDeg2Ref.current = new Set();
       setSoloGroupIdx(null);
 
       if (!pathStartRef.current || pathNodesRef.current.size > 1) {
-        // Pick start node A
         pathStartRef.current = hit;
         pathNodesRef.current = new Set([hit.id]);
         pathEdgesRef.current = new Set();
@@ -1638,35 +1758,56 @@ export default function GraphView({
       }
       pathNodesRef.current = new Set(chain);
       pathEdgesRef.current = edgeSet;
+
+      const nodeMap = new Map(nodesRef.current.map((n) => [n.id, n]));
+      const chainItems = chain.map((id) => {
+        const n = nodeMap.get(id);
+        return {
+          path: n?.path || id,
+          title: n?.title || id,
+          unresolved: Boolean(n?.unresolved),
+        };
+      });
+
       setStatusPill({
-        kind: 'path',
-        text: `Shortest path: "${startNode.title}" → "${hit.title}" (${chain.length - 1} hops)`,
-        hint: 'Click any glowing note to open, or click empty space to clear',
+        kind: 'path-chain',
+        hops: chain.length - 1,
+        chain: chainItems,
       });
       draw();
     };
 
     const onPointerDown = (e) => {
-      // Cancel active camera fly-to if user interacts
       if (flyRafRef.current) {
         cancelAnimationFrame(flyRafRef.current);
         flyRafRef.current = null;
       }
 
-      // Feature A1 + A2: Right-click spotlight lock & 1st/2nd degree toggle
+      // Desktop Right-Click / Two-Finger Trackpad Tap:
+      // 1st tap on node -> Lock 1st-degree connections
+      // 2nd tap on SAME locked node -> Open interactive Quick Peek Card
+      // Tap on empty space -> 2-step rewind (Peek -> Lock -> Normal)
       if (e.pointerType === 'mouse' && e.button === 2 && mode === 'global') {
         e.preventDefault();
         const hit = hitTestNode(e.clientX, e.clientY, false);
         if (hit) {
           if (lockedNodeRef.current && lockedNodeRef.current.id === hit.id) {
-            const nextDepth = lockDepthRef.current === 1 ? 2 : 1;
-            engageLock(hit, nextDepth);
+            if (pinnedPeekRef.current && pinnedPeekRef.current.id === hit.id) {
+              closePinnedPeekOnly(false);
+            } else {
+              openPinnedPeek(hit, false);
+            }
           } else {
-            engageLock(hit, 1);
+            engageLock(hit, false);
           }
         } else {
-          if (lockedNodeRef.current) releaseLock();
-          if (pathNodesRef.current.size > 0) clearPath();
+          if (pinnedPeekRef.current) {
+            closePinnedPeekOnly(false);
+          } else if (lockedNodeRef.current) {
+            releaseLock();
+          } else if (pathNodesRef.current.size > 0) {
+            clearPath();
+          }
         }
         return;
       }
@@ -1676,7 +1817,7 @@ export default function GraphView({
       const isTouch = e.pointerType === 'touch';
       const hit = hitTestNode(e.clientX, e.clientY, isTouch);
 
-      // Feature A3: Shift + Click Shortest-Path Synapse Tracer
+      // Shift + Click Shortest-Path Synapse Tracer
       if (mode === 'global' && !isTouch && e.shiftKey && e.button === 0) {
         if (hit && !hit.unresolved) {
           handleShiftPathClick(hit);
@@ -1694,7 +1835,7 @@ export default function GraphView({
         isLongPress = false;
         touchTargetNode = null;
         draggedNodeRef.current = null;
-        pendingUnlockOnClick = false;
+        pendingDismissAction = null;
         if (!lockedNodeRef.current) startHoverTransition(null);
         isPanning = false;
         const pts = [...activePointers.values()];
@@ -1707,16 +1848,18 @@ export default function GraphView({
       movedDist = 0;
       isLongPress = false;
       touchTargetNode = null;
-      pendingUnlockOnClick = false;
+      pendingDismissAction = null;
 
       if (isTouch) {
         if (hit) {
-          // If locked or path active and user taps a non-glowing node: only unlock on tap
-          if (
-            (lockedNodeRef.current && !isNodeGlowingInLock(hit.id)) ||
-            (pathNodesRef.current.size > 0 && !pathNodesRef.current.has(hit.id))
-          ) {
-            pendingUnlockOnClick = true;
+          // If locked or path active and user taps a non-glowing node: step back on tap
+          if (lockedNodeRef.current && !isNodeGlowingInLock(hit.id)) {
+            pendingDismissAction = pinnedPeekRef.current ? 'peek' : 'unlock';
+            isPanning = true;
+            return;
+          }
+          if (pathNodesRef.current.size > 0 && !pathNodesRef.current.has(hit.id)) {
+            pendingDismissAction = 'path';
             isPanning = true;
             return;
           }
@@ -1726,17 +1869,25 @@ export default function GraphView({
             isLongPress = true;
             if (mode === 'global') {
               if (lockedNodeRef.current && lockedNodeRef.current.id === hit.id) {
-                engageLock(hit, lockDepthRef.current === 1 ? 2 : 1);
+                if (pinnedPeekRef.current && pinnedPeekRef.current.id === hit.id) {
+                  closePinnedPeekOnly(true);
+                } else {
+                  openPinnedPeek(hit, true);
+                }
               } else {
-                engageLock(hit, 1);
+                engageLock(hit, true);
               }
             } else {
               startHoverTransition(hit);
             }
           }, 260);
         } else {
-          if (lockedNodeRef.current || pathNodesRef.current.size > 0) {
-            pendingUnlockOnClick = true;
+          if (pinnedPeekRef.current) {
+            pendingDismissAction = 'peek';
+          } else if (lockedNodeRef.current) {
+            pendingDismissAction = 'unlock';
+          } else if (pathNodesRef.current.size > 0) {
+            pendingDismissAction = 'path';
           } else {
             startHoverTransition(null);
           }
@@ -1753,8 +1904,8 @@ export default function GraphView({
           hit.fy = hit.y;
           simRef.current?.alphaTarget(0.25).restart();
         } else {
-          // Clicking empty space OR any dimmed node: allow panning if dragged, otherwise unlock ONLY
-          pendingUnlockOnClick = true;
+          // 2-step empty/dimmed-space dismiss: first closes Peek Card, next unlocks Lock
+          pendingDismissAction = pinnedPeekRef.current ? 'peek' : 'unlock';
           isPanning = true;
         }
         return;
@@ -1767,7 +1918,7 @@ export default function GraphView({
           hit.fy = hit.y;
           simRef.current?.alphaTarget(0.25).restart();
         } else {
-          pendingUnlockOnClick = true;
+          pendingDismissAction = 'path';
           isPanning = true;
         }
         return;
@@ -1845,11 +1996,17 @@ export default function GraphView({
       if (e.pointerType !== 'touch') {
         const hit = hitTestNode(e.clientX, e.clientY, false);
 
-        // Update Alt+Hover Quick Peek Card (Feature A6)
-        if (mode === 'global' && (e.altKey || altKeyRef.current) && hit && !hit.unresolved) {
+        // Passive Alt+Hover Quick Peek Card (only when no pinned peek card is open)
+        if (
+          mode === 'global' &&
+          !pinnedPeekRef.current &&
+          (e.altKey || altKeyRef.current) &&
+          hit &&
+          !hit.unresolved
+        ) {
           const meta = notesByPathRef.current.get(hit.path);
           if (meta) {
-            setPeekCard({
+            setHoverPeek({
               title: meta.title,
               folder: meta.folder,
               wordCount: meta.wordCount,
@@ -1860,7 +2017,7 @@ export default function GraphView({
             });
           }
         } else {
-          setPeekCard((prev) => (prev ? null : prev));
+          setHoverPeek((prev) => (prev ? null : prev));
         }
 
         if (hit !== hoveredNodeRef.current) {
@@ -1897,16 +2054,27 @@ export default function GraphView({
           simRef.current?.alphaTarget(0);
         }
 
-        if (pendingUnlockOnClick && movedDist < 7) {
-          if (lockedNodeRef.current) releaseLock();
-          if (pathNodesRef.current.size > 0) clearPath();
-        } else if (!isLongPress && touchTargetNode && movedDist < 7 && !touchTargetNode.unresolved && onSelectNote) {
+        if (pendingDismissAction && movedDist < 7) {
+          if (pendingDismissAction === 'peek') closePinnedPeekOnly(true);
+          else if (pendingDismissAction === 'unlock') releaseLock();
+          else if (pendingDismissAction === 'path') clearPath();
+        } else if (
+          !isLongPress &&
+          touchTargetNode &&
+          movedDist < 7 &&
+          !touchTargetNode.unresolved &&
+          onSelectNoteRef.current
+        ) {
           const target = touchTargetNode;
           touchTargetNode = null;
-          onSelectNote(target.path, false);
+          pinnedPeekRef.current = null;
+          setPinnedPeek(null);
+          onSelectNoteRef.current(target.path, false);
+        } else if (!touchTargetNode && !pendingDismissAction && movedDist < 7) {
+          handleEmptySpaceTapForDoubleTap(e.clientX, e.clientY);
         }
 
-        pendingUnlockOnClick = false;
+        pendingDismissAction = null;
         isLongPress = false;
         touchTargetNode = null;
         isPanning = false;
@@ -1920,20 +2088,25 @@ export default function GraphView({
         draggedNodeRef.current = null;
         simRef.current?.alphaTarget(0);
 
-        if (movedDist < 5 && !dragged.unresolved && onSelectNote) {
-          onSelectNote(dragged.path, e.ctrlKey || e.metaKey || e.button === 1);
+        if (movedDist < 5 && !dragged.unresolved && onSelectNoteRef.current) {
+          pinnedPeekRef.current = null;
+          setPinnedPeek(null);
+          onSelectNoteRef.current(dragged.path, e.ctrlKey || e.metaKey || e.button === 1);
         }
-      } else if (pendingUnlockOnClick && movedDist < 5) {
-        if (lockedNodeRef.current) releaseLock();
-        if (pathNodesRef.current.size > 0) clearPath();
+      } else if (pendingDismissAction && movedDist < 5) {
+        if (pendingDismissAction === 'peek') closePinnedPeekOnly(false);
+        else if (pendingDismissAction === 'unlock') releaseLock();
+        else if (pendingDismissAction === 'path') clearPath();
+      } else if (!pendingDismissAction && movedDist < 5 && e.button === 0) {
+        handleEmptySpaceTapForDoubleTap(e.clientX, e.clientY);
       }
 
-      pendingUnlockOnClick = false;
+      pendingDismissAction = null;
       isPanning = false;
     };
 
     const onPointerLeave = () => {
-      setPeekCard(null);
+      setHoverPeek(null);
       if (!draggedNodeRef.current && hoveredNodeRef.current) {
         canvas.style.cursor = 'grab';
         startHoverTransition(null);
@@ -1986,7 +2159,7 @@ export default function GraphView({
       canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('wheel', onWheel);
     };
-  }, [onSelectNote, mode]);
+  }, [mode, fitViewToNodes]);
 
   const toggleGroupVisibility = (idx, e) => {
     e.stopPropagation();
@@ -2001,13 +2174,12 @@ export default function GraphView({
 
   const toggleGroupSolo = (idx) => {
     if (hiddenGroups.has(idx)) return;
-    // Clear lock/path if soloing a color group
     if (lockedNodeRef.current) {
       lockedNodeRef.current = null;
-      lockDepthRef.current = 1;
       lockDeg1Ref.current = new Set();
-      lockDeg2Ref.current = new Set();
     }
+    pinnedPeekRef.current = null;
+    setPinnedPeek(null);
     pathStartRef.current = null;
     pathNodesRef.current = new Set();
     pathEdgesRef.current = new Set();
@@ -2046,12 +2218,12 @@ export default function GraphView({
         >
           <Maximize2 size={14} />
         </button>
-        {mode === 'global' && effectiveFocusPath && (
+        {mode === 'global' && locateTargetPath && (
           <button
             className="obs-icon-btn"
             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-            onClick={() => flyToNote(effectiveFocusPath)}
-            title="Locate active note in graph (F)"
+            onClick={() => flyToNote(locateTargetPath)}
+            title="Locate last-opened note in graph (F)"
           >
             <Crosshair size={14} />
           </button>
@@ -2066,43 +2238,55 @@ export default function GraphView({
         </button>
       </div>
 
-      {/* Subtle Bottom Status Pill (appears ONLY when locked or tracing shortest path) */}
+      {/* Subtle Bottom Status Pill (Lock status or Clickable Shortest-Path Hop Trail) */}
       {mode === 'global' && statusPill && (
-        <div
-          className="obs-graph-pill"
-          style={{
-            position: 'absolute',
-            bottom: 14,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '6px 12px',
-            borderRadius: 999,
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-            boxShadow: 'var(--shadow-lg)',
-            fontSize: 12,
-            color: 'var(--text-normal)',
-            zIndex: 22,
-            maxWidth: 'calc(100% - 28px)',
-          }}
-        >
-          <span
-            style={{
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {statusPill.text}
-            {statusPill.hint && (
-              <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
-                · {statusPill.hint}
+        <div className="obs-graph-pill">
+          {statusPill.kind === 'path-chain' ? (
+            <div className="obs-graph-pill-content">
+              <span style={{ color: 'var(--text-muted)', fontWeight: 500, flexShrink: 0 }}>
+                {statusPill.hops} {statusPill.hops === 1 ? 'hop' : 'hops'}:
               </span>
-            )}
-          </span>
+              {statusPill.chain.map((step, i) => (
+                <React.Fragment key={`${step.path}-${i}`}>
+                  <button
+                    type="button"
+                    className="obs-hop-btn"
+                    title={step.title}
+                    onClick={(e) => {
+                      if (!step.unresolved && onSelectNoteRef.current) {
+                        onSelectNoteRef.current(step.path, e.ctrlKey || e.metaKey);
+                      }
+                    }}
+                    onAuxClick={(e) => {
+                      if (e.button === 1 && !step.unresolved && onSelectNoteRef.current) {
+                        onSelectNoteRef.current(step.path, true);
+                      }
+                    }}
+                  >
+                    {step.title}
+                  </button>
+                  {i < statusPill.chain.length - 1 && (
+                    <span className="obs-hop-sep">→</span>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          ) : (
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {statusPill.text}
+              {statusPill.hint && (
+                <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
+                  · {statusPill.hint}
+                </span>
+              )}
+            </span>
+          )}
           <button
             className="obs-icon-btn"
             style={{ width: 20, height: 20 }}
@@ -2114,25 +2298,104 @@ export default function GraphView({
         </div>
       )}
 
-      {/* Alt + Hover Quick Note Peek Card (Feature A6) */}
-      {mode === 'global' && peekCard && (
+      {/* Pinned Interactive Quick Peek Card (2nd two-finger tap / 2nd long-press) */}
+      {mode === 'global' && pinnedPeek && (
+        <div
+          className="obs-graph-peek"
+          style={{ left: pinnedPeek.left, top: pinnedPeek.top }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="obs-graph-peek-head">
+            <div style={{ minWidth: 0 }}>
+              <div className="obs-hover-preview-title" style={{ marginBottom: 2 }}>
+                {pinnedPeek.title}
+              </div>
+              <div className="obs-hover-preview-folder" style={{ marginBottom: 0 }}>
+                {pinnedPeek.folder || 'Vault root'} · {pinnedPeek.degree} links ·{' '}
+                {pinnedPeek.wordCount.toLocaleString()} words
+              </div>
+            </div>
+            <button
+              className="obs-icon-btn"
+              style={{ width: 22, height: 22 }}
+              onClick={() => {
+                pinnedPeekRef.current = null;
+                setPinnedPeek(null);
+                if (lockedNodeRef.current) {
+                  setStatusPill({
+                    kind: 'lock',
+                    text: `Locked: ${lockedNodeRef.current.title} · ${lockDeg1Ref.current.size} connected`,
+                    hint: 'Right-click again to preview',
+                  });
+                }
+              }}
+              title="Close preview (keeps nodes highlighted)"
+            >
+              <X size={13} />
+            </button>
+          </div>
+
+          {(pinnedPeek.paper || pinnedPeek.tags.length > 0) && (
+            <div className="obs-graph-peek-tags">
+              {pinnedPeek.paper && (
+                <span className="obs-props-chip">{pinnedPeek.paper}</span>
+              )}
+              {pinnedPeek.tags.map((t) => (
+                <span key={t} className="obs-tag-pill" style={{ cursor: 'default' }}>
+                  #{t}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {pinnedPeek.excerpt && (
+            <div className="obs-hover-preview-body">{pinnedPeek.excerpt}</div>
+          )}
+
+          <div className="obs-graph-peek-actions">
+            <button
+              type="button"
+              className="obs-graph-peek-open"
+              onClick={(e) => {
+                const targetPath = pinnedPeek.path;
+                pinnedPeekRef.current = null;
+                setPinnedPeek(null);
+                if (onSelectNoteRef.current) {
+                  onSelectNoteRef.current(targetPath, e.ctrlKey || e.metaKey);
+                }
+              }}
+              onAuxClick={(e) => {
+                if (e.button === 1 && onSelectNoteRef.current) {
+                  onSelectNoteRef.current(pinnedPeek.path, true);
+                }
+              }}
+            >
+              <ExternalLink size={12} />
+              <span>Open note</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Passive Alt + Hover Quick Peek Card (desktop) */}
+      {mode === 'global' && hoverPeek && !pinnedPeek && (
         <div
           className="obs-hover-preview"
           style={{
-            left: peekCard.x,
-            top: peekCard.y,
+            left: hoverPeek.x,
+            top: hoverPeek.y,
             width: 320,
             maxHeight: 195,
             pointerEvents: 'none',
           }}
         >
-          <div className="obs-hover-preview-title">{peekCard.title}</div>
+          <div className="obs-hover-preview-title">{hoverPeek.title}</div>
           <div className="obs-hover-preview-folder">
-            {peekCard.folder || 'Vault root'} · {peekCard.degree} links ·{' '}
-            {(peekCard.wordCount || 0).toLocaleString()} words
+            {hoverPeek.folder || 'Vault root'} · {hoverPeek.degree} links ·{' '}
+            {(hoverPeek.wordCount || 0).toLocaleString()} words
           </div>
-          {peekCard.excerpt && (
-            <div className="obs-hover-preview-body">{peekCard.excerpt}</div>
+          {hoverPeek.excerpt && (
+            <div className="obs-hover-preview-body">{hoverPeek.excerpt}</div>
           )}
         </div>
       )}

@@ -70,6 +70,16 @@ function slugifyHeading(text) {
     .replace(/^-|-$/g, '') || 'section';
 }
 
+function splitWikiPipe(inner) {
+  const pipeIdx = inner.indexOf('|');
+  if (pipeIdx === -1) {
+    return [inner, null];
+  }
+  const targetPart = inner.slice(0, pipeIdx).replace(/\\$/, '');
+  const aliasPart = inner.slice(pipeIdx + 1);
+  return [targetPart, aliasPart];
+}
+
 function stripCodeBlocksAndInlineCode(md) {
   return md
     .replace(/```[\s\S]*?```/g, '')
@@ -79,9 +89,10 @@ function stripCodeBlocksAndInlineCode(md) {
 
 function stripMarkdownForSearch(md) {
   return md
+    .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[\[([^\]]+)\]\]/g, ' ')
-    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]|]+?)\\?\|([^\]]+)\]\]/g, '$2')
     .replace(/\[\[([^\]]+)\]\]/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -132,7 +143,7 @@ function extractHeadings(mdBody) {
     const level = match[1].length;
     const rawText = match[2].trim();
     const cleanText = rawText
-      .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+      .replace(/\[\[([^\]|]+?)\\?\|([^\]]+)\]\]/g, '$2')
       .replace(/\[\[([^\]]+)\]\]/g, '$1')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
       .replace(/[*_`~]/g, '');
@@ -165,7 +176,7 @@ function extractLinks(mdBody) {
   const clean = stripCodeBlocksAndInlineCode(mdBody);
   const links = [];
 
-  // Wikilinks & embeds: [[target#heading|alias]] or ![[target]]
+  // Wikilinks & embeds: [[target#heading|alias]], [[target\|alias]], or ![[target]]
   const wikiRegex = /(!?)\[\[([^\]]+)\]\]/g;
   let match;
   while ((match = wikiRegex.exec(clean)) !== null) {
@@ -173,7 +184,7 @@ function extractLinks(mdBody) {
     const inner = match[2].trim();
     if (!inner) continue;
 
-    const [targetPart, aliasPart] = inner.split('|');
+    const [targetPart, aliasPart] = splitWikiPipe(inner);
     const [notePartRaw, headingPart] = targetPart.split('#');
     const target = notePartRaw.trim();
     const heading = headingPart ? headingPart.trim() : null;
@@ -191,8 +202,8 @@ function extractLinks(mdBody) {
     });
   }
 
-  // Standard markdown links: [label](url)
-  const mdLinkRegex = /(!?)\[([^\]]*)\]\(([^)\s]+(?:\s+"[^"]*")?)\)/g;
+  // Standard markdown links: [label](url) or [label](<path with spaces>)
+  const mdLinkRegex = /(!?)\[([^\]]*)\]\((<[^>]+>|[^)\s]+(?:\s+"[^"]*")?)\)/g;
   while ((match = mdLinkRegex.exec(clean)) !== null) {
     const isEmbed = match[1] === '!';
     let href = match[3].replace(/\s+"[^"]*"$/, '').trim();
@@ -222,13 +233,21 @@ function extractLinks(mdBody) {
 }
 
 function extractContextSnippet(cleanText, targetRaw) {
-  const idx = cleanText.indexOf(targetRaw);
+  const stripped = cleanText.replace(/<!--[\s\S]*?-->/g, ' ');
+  const idx = stripped.indexOf(targetRaw);
   if (idx === -1) return '';
   const start = Math.max(0, idx - 80);
-  const end = Math.min(cleanText.length, idx + targetRaw.length + 100);
-  let snippet = cleanText.slice(start, end).replace(/\s+/g, ' ').trim();
+  const end = Math.min(stripped.length, idx + targetRaw.length + 100);
+  let snippet = stripped
+    .slice(start, end)
+    .replace(/\[\[([^\]|]+?)\\?\|([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/^---+\s*/gm, '')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (start > 0) snippet = '...' + snippet;
-  if (end < cleanText.length) snippet = snippet + '...';
+  if (end < stripped.length) snippet = snippet + '...';
   return snippet;
 }
 
