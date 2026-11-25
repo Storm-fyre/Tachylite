@@ -3,135 +3,130 @@ id: hub-eth
 title: Ethics and Moral Philosophy
 paper: [GS4, Prelims, Essay]
 chapters: 11
-status: batch5-draft
-last_synced: 2026-11-20
+status: synced
+last_synced: 2026-11-25
 ---
 
-# 🧭 Subject Hub: Ethics and Moral Philosophy `#subject-hub`
+# 🧭 Subject Hub: Ethics and Moral Philosophy
 
-> [!abstract] Hub Design Principle
-> **Mains GS4 + 2026 Prelims Situational Shield + All-Philosophical Essay Engine:** Built from first-principles moral philosophy, behavioral science, and Indian administrative realism—zero preachy clichés. Directly calibrated for **Mains 2026's frontier case themes** (*AI in policing/welfare, medical consent*) AND **Prelims 2026's new GS-I situational ethics MCQs**.
-
----
-
-### Chapter 1: Foundational Moral Philosophy, Normative Epistemology & the Anatomy of Human Values
-> **Depth Rubric:** Analytical Mains GS4 & Essay Foundation
-> **Gated Obsidian Elements:** `Four Branches of Ethics & Ethics–Morals–Law Distinction Matrix` · `Whole-UPSC Spillover`
-
-- **Philosophical foundations:** moral realism vs. anti-realism, ethical universalism vs. cultural relativism; Meta-ethics (**Hume’s Is–Ought** & **G.E. Moore’s Naturalistic Fallacy**), Normative, Descriptive & Applied ethics
-- **Moral agency & culpability:** *Actus Humanus* vs. *Actus Hominis*, knowledge/voluntariness/free will, impediments (ignorance, passion, coercion), 4 determinants (act, intention, circumstances, consequences); Ethics vs. Morals vs. Values vs. Law vs. Social Etiquette
-- **Private vs. Public ethics:** role morality, Machiavelli & Michael Walzer’s **"Dirty Hands"**, private conscience vs. constitutional duty; Nepotism, Cronyism & **Conflict of Interest vs. Crisis of Conscience**
-- **Human values & moral psychology:** intrinsic vs. instrumental values; **Lawrence Kohlberg’s 6 stages** vs. **Carol Gilligan’s feminist Ethics of Care**; socialization agencies (family, school "hidden curriculum", peer/media); Hedonic vs. Eudaimonic happiness
+> [!abstract] Live Auto-Synced Syllabus Map
+> **11 Chapters** · Synced directly from live audited chapter files on **2026-11-25** (zero stale summary drift). Click any heading below to open the full unit.
 
 ---
 
-### Chapter 2: Western Normative Ethics — Virtue, Deontology, Utilitarianism & Theories of Justice
-> **Depth Rubric:** Analytical Mains GS4 & Essay Deep Dive
-> **Gated Obsidian Elements:** `Western Moral Thinkers & Applied Lenses Comparison Matrix` · `Whole-UPSC Spillover`
+### [[1. Foundational Moral Philosophy, Normative Epistemology & the Anatomy of Human Values|Chapter 1: Foundational Moral Philosophy, Normative Epistemology & the Anatomy of Human Values]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 & Essay Foundation · **Verified:** 2026-11-23
 
-- **Classical Virtue Ethics & Stoicism:** Socrates (*virtue is knowledge*), Plato (*Republic*, Ring of Gyges, Four Cardinal Virtues), **Aristotle** (*Nicomachean Ethics*: *Eudaimonia*, Golden Mean, *Phronesis*, character habituation); Stoicism (Marcus Aurelius, Epictetus, Seneca: dichotomy of control) & St. Thomas Aquinas (Natural Law & **Doctrine of Double Effect**)
-- **Deontology:** **Immanuel Kant** (Good Will, Duty for Duty’s Sake, autonomy vs. heteronomy, **Categorical Imperatives** — Universalizability, Humanity as an End, Kingdom of Ends) + W.D. Ross’s *Prima Facie* duties
-- **Consequentialism & Utilitarianism:** Ethical Egoism vs. **Jeremy Bentham** (quantitative felicific calculus) vs. **J.S. Mill** (qualitative pleasures, **Harm Principle**, Act vs. Rule Utilitarianism)
-- **Social Contract & Distributive Justice:** Hobbes, Locke, Rousseau; **John Rawls** (Original Position, **Veil of Ignorance**, Liberty & **Difference Principles**) vs. **Robert Nozick’s** libertarian critique; **Amartya Sen (*Niti* vs. *Nyaya*)** & Martha Nussbaum’s Capability Approach; Communitarianism (Sandel, MacIntyre) & Sartre’s Existentialism
-
----
-
-### Chapter 3: Indian & Non-Western Ethical Traditions — Dharma, Nishkama Karma & Emancipatory Morality
-> **Depth Rubric:** Analytical Mains GS4 & Essay Deep Dive
-> **Gated Obsidian Elements:** `Indian Moral Thinkers & Civil Service Applications Matrix` · `Whole-UPSC Spillover`
-> **Provisional Context Bridge:** Classical Shramana/Shad-Darshana metaphysics → `Indian History & Culture`
-
-- **Vedic–Upanishadic & Heterodox moral core:** *Rta*, *Satya*, *Dharma*, *Karma*, *Rina*, *Purusharthas*, *Vasudhaiva Kutumbakam*; Buddhist *Middle Path* & *Karuna*; Jain *Ahimsa, Anekantavada* & *Aparigraha*; Charvaka
-- **Classical Indian texts:** **Bhagavad Gita** (*Nishkama Karma, Svadharma, Lokasamgraha, Sthitaprajna*); **Kautilya’s *Arthashastra*** (*Rajadharma* systemic probity) vs. **Tiruvalluvar’s** universal secular ***Tirukkural*** (*Aram, Porul, Inbam*)
-- **Bhakti–Sufi & Modern Indian moral vanguard:** Kabir, Guru Nanak (*Kirat Karo, Vand Chhako*), Basavanna (*Kayaka & Dasoha*); Rammohan, Vidyasagar, Phules, **Swami Vivekananda** (*Practical Vedanta / Daridra Narayana*), Tagore, Sri Aurobindo, **Mahatma Gandhi** (Means–Ends unity, *Satyagraha, Sarvodaya, Antyodaya*, Trusteeship, **Talisman**, 7 Social Sins), **B.R. Ambedkar (Constitutional Morality)**, Radhakrishnan & A.P.J. Abdul Kalam
-- **Non-Western bridges:** Confucianism (*Ren, Li, Junzi*) & African *Ubuntu*
+- Philosophical Foundations - Meta-Ethics, Realism & the Relativism Trap
+- Moral Agency, Culpability & the Boundaries of Normative Systems
+- Private vs. Public Ethics - Role Morality, Dirty Hands & Conflicts of Duty
+- Human Values, Moral Psychology & the Architecture of Happiness
 
 ---
 
-### Chapter 4: Attitude, Behavioral Psychology, Cognitive Biases, Persuasion & Administrative Evil
-> **Depth Rubric:** Analytical Mains GS4 + Behavioral Public Policy
-> **Gated Obsidian Elements:** `Persuasion Mechanics & Social Psychology of Administrative Evil Matrix` · `Whole-UPSC Spillover`
+### [[2. Western Normative Ethics — Virtue, Deontology, Utilitarianism & Theories of Justice|Chapter 2: Western Normative Ethics — Virtue, Deontology, Utilitarianism & Theories of Justice]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 & Essay Deep Dive · **Verified:** 2026-11-23
 
-- **Attitude anatomy & change:** CAB/ABC model, Ambivalence, Daniel Katz’s 4 functions; Ajzen–Fishbein Theory of Planned Behavior (attitude–behavior gap); Festinger’s **Cognitive Dissonance**, Elaboration Likelihood Model (central vs. peripheral), **Robert Cialdini’s 6 persuasion principles**; implicit bias & Allport’s Intergroup Contact Hypothesis
-- **Behavioral economics in governance:** **Kahneman & Tversky** (System 1 vs. System 2 & heuristics) and **Thaler & Sunstein’s Nudge Theory** (libertarian paternalism & ethical limits of choice architecture in Swachh Bharat/taxation)
-- **Social psychology of Administrative Evil (High-Scoring GS4/Essay Arsenal):** **Hannah Arendt’s *Banality of Evil*** (bureaucratic thoughtlessness), **Stanley Milgram’s Obedience** (agentic shift), **Philip Zimbardo’s Lucifer Effect**, **Albert Bandura’s Moral Disengagement**, Bystander Effect & Irving Janis’s Groupthink
-
----
-
-### Chapter 5: Emotional Intelligence (EI) in Public Administration, Neurobiology & Conflict Resolution
-> **Depth Rubric:** Analytical Mains GS4 + Practical Administrative Realism
-> **Gated Obsidian Elements:** `EI Models & Conflict-Resolution Modes Matrix` · `Mains Arsenal`
-
-- **EI frameworks & neurobiology:** Salovey–Mayer 4-branch ability model, Bar-On EQ-i, **Daniel Goleman’s 5 competencies** (Self-Awareness, Self-Regulation, Motivation, Empathy, Social Skills); IQ vs. EQ vs. SQ; Joseph LeDoux’s ***Amygdala Hijack***, Prefrontal Cortex regulation, mirror neurons & chronic cortisol burnout
-- **Contemplative self-regulation & compassion:** Gita’s *Sthitaprajna*, Patanjali’s *Chitta-Vritti-Nirodha*, Buddhist *Vipassana* & *Upekkha*; Empathy vs. Sympathy vs. Compassion & preventing **Compassion Fatigue / Vicarious Trauma**
-- **Administrative applications of EI:** de-escalating riots/mob violence without lethal escalation, empathetic communication in disasters & land acquisition, handling illegitimate political pressure, ethical leadership & **Thomas–Kilmann Conflict Modes**
+- Classical Virtue Ethics, Stoicism & Natural Law
+- Deontology - Kantian Autonomy & Rossian Pluralism
+- Consequentialism & Utilitarianism - From Calculus to Harm Principle
+- Social Contract, Distributive Justice, Communitarianism & Existentialism
+- Master Synthesis - Western Moral Thinkers & Applied Lenses Matrix
 
 ---
 
-### Chapter 6: Aptitude, Foundational Civil Service Values, Administrative Discretion & Codes of Ethics
-> **Depth Rubric:** Dual-Core Mains GS4 + **Prelims Situational Judgment Shield**
-> **Gated Obsidian Elements:** `Nolan 7 Principles & Code of Ethics vs. Code of Conduct Matrix` · `Prelims Situational Traps` · `Mains Arsenal`
+### [[3. Indian & Non-Western Ethical Traditions — Dharma, Nishkama Karma & Emancipatory Morality|Chapter 3: Indian & Non-Western Ethical Traditions — Dharma, Nishkama Karma & Emancipatory Morality]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 & Essay Deep Dive · **Verified:** 2026-11-23
 
-- **Aptitude vs. Attitude:** cognitive/operational capability vs. moral compass (competence–conscience matrix)
-- **Foundational Civil Service Values:** **Integrity** (moral wholeness vs. mere honesty), Impartiality (equity vs. equality), Non-Partisanship, Objectivity (evidence-based rationality), Dedication (*Antyodaya*), Empathy, Tolerance (**Popper’s Paradox of Tolerance**) & Courage of Conviction (whistleblower mindset)
-- **Bureaucratic ethos & discretion:** **Max Weber’s *Sine Ira et Studio***, Paul Appleby’s democratic morality, Political Neutrality & Constitutional Anonymity vs. "Committed Bureaucracy"; **Lord Nolan Committee’s 7 Principles**; **Discretion Dilemmas** (rigid rule-fetishism / Red Tape vs. substantive equity)
-- **Codes & Conflicts:** **Code of Ethics** (aspirational — Hota 2004, 2nd ARC 4th Report) vs. **Code of Conduct** (punitive — CCS 1964 / AIS 1968 Rules); Conflicts of Interest (actual, potential, perceived; cooling-off & recusal)
-
----
-
-### Chapter 7: Probity in Governance, Philosophical Basis of Transparency, Public Funds & Work Culture
-> **Depth Rubric:** Analytical Mains GS4 Deep Dive
-> **Gated Obsidian Elements:** `Coercive vs. Collusive Corruption & Public-Fund Ethics Matrix` · `Mains Arsenal`
-> **Provisional Context Bridge:** Statutory RTI, PCA, CVC, Lokpal, Sevottam & Mission Karmayogi mechanics → `Governance`
-
-- **Philosophical basis of probity:** Social Contract, Public Office as a Fiduciary Trust, Kautilyan fiscal skepticism & procedural uprightness beyond mere non-corruption
-- **Economics & taxonomy of corruption:** **Robert Klitgaard’s equation** ($C = M + D - A$), Principal–Agent asymmetry, **Coercive (extortionary) vs. Collusive (quid pro quo) Corruption**
-- **Normative ethics of Transparency, Public Funds & Work Culture:** philosophical conflict between Citizen’s Right to Know, bureaucratic secrecy (OSA ethos) & personal privacy (DPDP balance); normative philosophy of Citizen’s Charters & Sevottam; **Ethics of Utilizing Public Funds** (Canons of Financial Propriety, *March Rush*, leakages, **Competitive Populism / Freebies vs. Capability Investments**); **Work Culture** (*Chalta Hai* apathy vs. *Kaizen*, psychological safety & **"Insta-Babu" civil-servant social-media ethics vs. anonymity**)
+- Vedic–Upanishadic & Heterodox Moral Core
+- Classical Indian Ethical Texts - *Bhagavad Gita*, *Arthashastra* & *Tirukkural*
+- Bhakti–Sufi Egalitarianism & the Modern Indian Moral Vanguard
+- Non-Western Ethical Bridges - Confucianism & African *Ubuntu*
+- Master Synthesis - Indian & Non-Western Moral Thinkers Matrix
 
 ---
 
-### Chapter 8: Corporate Governance, Stakeholder Capitalism, CSR, Greenwashing & Global Probity
-> **Depth Rubric:** Analytical Mains GS4 & GS3 Synthesis
-> **Gated Obsidian Elements:** `Shareholder vs. Stakeholder vs. Trusteeship Comparison Table` · `Mains Arsenal`
+### [[4. Attitude, Behavioral Psychology, Cognitive Biases, Persuasion & Administrative Evil|Chapter 4: Attitude, Behavioral Psychology, Cognitive Biases, Persuasion & Administrative Evil]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 + Behavioral Public Policy · **Verified:** 2026-11-23
 
-- **Philosophy of corporate purpose:** **Milton Friedman’s Shareholder Primacy** vs. **R. Edward Freeman’s Stakeholder Theory**, John Elkington’s **Triple Bottom Line**, Michael Porter’s Creating Shared Value & **Gandhi’s Trusteeship**
-- **Corporate failure anatomy & Indian reforms:** Enron, Satyam, related-party siphoning, crony capitalism & startup governance collapses (Byju’s/BharatPe); Kumar Mangalam Birla → Narayana Murthy → **Uday Kotak Committee (SEBI LODR: Chair/MD separation, Independent Directors, NFRA)**
-- **CSR, Automation & ESG Integrity:** ethical critique of **Sec 135 CSR** compliance tokenism, ethics of **AI-driven workforce downsizing**, ESG **Greenwashing** deception & SEBI **BRSR Core** assurance; **UNCAC (2003)** & OECD Anti-Bribery Convention
-
----
-
-### Chapter 9: Ethics in International Relations, Just War Theory, Refugees & Global Distributive Justice
-> **Depth Rubric:** Analytical Mains GS4 & Essay Synthesis
-> **Gated Obsidian Elements:** `Just War Theory & Global Distributive Justice Frameworks Table` · `Whole-UPSC Spillover`
-
-- **Normative paradigms in IR:** Political Realism (survival as supreme state duty) vs. Kantian Liberal Internationalism vs. **Moral Cosmopolitanism** (Peter Singer, Martha Nussbaum, Thomas Pogge)
-- **Just War Theory (*Bellum Justum* — Augustine, Aquinas, Grotius, Walzer):** *Jus ad bellum* (just cause, last resort, macro-proportionality), *Jus in bello* (distinction/non-combatant immunity, military necessity), *Jus post bellum* & Walzer’s *Supreme Emergency*; R2P humanitarian intervention vs. neo-imperial regime change
-- **Borders, Refugees & Foreign Aid Ethics:** ***Non-Refoulement*** vs. Garrett Hardin’s *Lifeboat Ethics*; ethical distortions in international funding (IMF austerity conditionalities, tied aid, debt-trap diplomacy, climate loans vs. grants, politicized aid)
-- **Global Distributive & Climate Justice:** Rawls’s *Law of Peoples* vs. Pogge’s Global Resources Dividend, historical carbon debt, climate refugees, vaccine apartheid, unilateral sanctions & autonomous drone warfare
+- Attitude Anatomy, Functions & the Attitude–Behavior Gap
+- Attitude Change Architecture & Ethical Persuasion
+- Behavioral Economics in Governance - Kahneman–Tversky & Nudge Theory
+- The Social Psychology of Administrative Evil
+- Master Synthesis - Persuasion Mechanics & Social Psychology of Administrative Evil Matrix
 
 ---
 
-### Chapter 10: Applied & Frontier Ethics — Bioethics, Medical Consent, Eco-Ethics & AI Policing/Welfare
-> **Depth Rubric:** Analytical Mains GS4 Deep Dive *(Directly Calibrated to Mains 2026 Frontier Case Studies)*
-> **Gated Obsidian Elements:** `Beauchamp–Childress Bioethics & AI Governance Dilemmas Matrix` · `Mains Arsenal` · `Whole-UPSC Spillover`
+### [[5. Emotional Intelligence (EI) in Public Administration, Neurobiology & Conflict Resolution|Chapter 5: Emotional Intelligence (EI) in Public Administration, Neurobiology & Conflict Resolution]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 + Practical Administrative Realism · **Verified:** 2026-11-23
 
-- **Biomedical & Clinical Ethics (2026 GS4 Hit):** **Beauchamp & Childress Four Principles** (Autonomy, Beneficence, Non-Maleficence, Distributive Justice); **Informed Medical Consent** (paternalism vs. patient autonomy, vulnerable clinical-trial subjects, Declaration of Helsinki); beginning/end-of-life dilemmas (MTP 2021, altruistic vs. commercial surrogacy, organ allocation, **Passive Euthanasia / *Common Cause*** living wills, CRISPR germline "designer babies")
-- **Environmental & Animal Philosophy:** Anthropocentrism vs. Biocentrism (Paul Taylor, Peter Singer’s critique of *Speciesism*) vs. Ecocentrism (**Aldo Leopold’s Land Ethic & Arne Næss’s Deep Ecology**), Vandana Shiva’s Ecofeminism, intergenerational stewardship & urban animal-welfare dilemmas
-- **Media, Judicial & Sports Ethics:** yellow journalism, paid news, trial by media, algorithmic outrage; **"Bulldozer / Encounter" instant justice vs. Rule of Law**; doping & NADA integrity
-- **Frontier AI & Algorithmic Ethics (2026 GS4 Hit):** **AI in Predictive Policing & Automated Welfare Targeting** (bias feedback loops, opacity, denial of due process/natural justice), Shoshana Zuboff’s *Surveillance Capitalism*, autonomous weapons (LAWS) accountability gap, Neurorights, and **2026 SC Draft AI Guidelines for the Judiciary ("human-in-the-loop")**
+- Epistemology of Emotional Intelligence - Architecture, Models & Limits
+- Neurobiology of Emotion, Executive Regulation & Chronic Cortisol Burnout
+- Contemplative Self-Regulation, Empathy Taxonomy & Safeguarding Compassion
+- Administrative Applications of EI & Conflict-Resolution Architecture
 
 ---
 
-### Chapter 11: Ethical Dilemmas in Public Administration, Case-Study Frameworks & Moral Decision-Making Models
-> **Depth Rubric:** Applied GS4 Section B Engine + **Prelims Situational Decision-Making Heuristics**
-> **Gated Obsidian Elements:** `5-Step Integrated Case-Study Protocol Flowchart (Mermaid)` · `Kidder's 4 Right-vs-Right Dilemmas & Admin Conflict Matrix` · `Prelims Situational Traps`
+### [[6. Aptitude, Foundational Civil Service Values, Administrative Discretion & Codes of Ethics|Chapter 6: Aptitude, Foundational Civil Service Values, Administrative Discretion & Codes of Ethics]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Dual-Core Mains GS4 + Prelims Situational Judgment Shield · **Verified:** 2026-11-23
 
-- **Anatomy of a genuine Ethical Dilemma:** Right vs. Right clashes (distinct from simple illegal/temptation scenarios)
-- **Rushworth Kidder’s Four Paradigms:** *Truth vs. Loyalty*, *Individual vs. Community*, *Short-Term vs. Long-Term*, *Justice vs. Mercy*
-- **Five Recurring Indian Administrative Conflict Matrices:** Law/Rules vs. Conscience (*Antigone*), Efficiency vs. Equity/Due Process, Development/Infra vs. Tribal/Ecological Displacement, Transparency vs. National Security/Privacy, Rule of Law vs. Populist Instant Justice
-- **Structured Decision-Making Architecture:** **Terry Cooper’s Responsible Administrator Model**, **Potter Box** (Facts–Values–Principles–Loyalties), and the **Five-Step Integrated Synthesis Protocol** — (1) Stakeholder & Fact Audit → (2) Constitutional/Statutory Red-Line Check → (3) Multi-Philosophical Interrogation (*Kant, Mill, Rawls/Gandhi’s Talisman, Aristotle/Gita*) → (4) Second-Order Risk & Mitigation → (5) Institutionalized, Accountable Resolution *(paired with crisp heuristics for cracking Prelims GS-I administrative judgment caselets under ambiguity)*
+- Aptitude vs. Attitude - The Competence–Conscience Architecture
+- Foundational Civil Service Values - Philosophical Rigor & Administrative Anatomy
+- Bureaucratic Ethos, Political Neutrality, Nolan Principles & Administrative Discretion
+- Codes of Ethics, Codes of Conduct & Conflict-of-Interest Architecture
 
-<!-- External personal vault backlinks intentionally left blank -->
+---
+
+### [[7. Probity in Governance, Philosophical Basis of Transparency, Public Funds & Work Culture|Chapter 7: Probity in Governance, Philosophical Basis of Transparency, Public Funds & Work Culture]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 Deep Dive · **Verified:** 2026-11-23
+
+- Philosophical Basis of Probity - Fiduciary Trust & Kautilyan Realism
+- Political Economy & Taxonomy of Corruption
+- Normative Philosophy of Transparency, Privacy & Citizen-Centric Service
+- Ethics of Utilizing Public Funds - Fiduciary Discipline, March Rush & Freebies
+- Administrative Work Culture - From *Chalta Hai* Apathy to *Kaizen* & Digital-Age Anonymity
+
+---
+
+### [[8. Corporate Governance, Stakeholder Capitalism, CSR, Greenwashing & Global Probity|Chapter 8: Corporate Governance, Stakeholder Capitalism, CSR, Greenwashing & Global Probity]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 & GS3 Synthesis · **Verified:** 2026-11-23
+
+- Philosophy of Corporate Purpose - From Shareholder Primacy to Trusteeship
+- Anatomy of Corporate Failures - Global Benchmarks, Cronyism & Indian Startup Collapses
+- Evolution of Indian Corporate Governance Reforms - Committees, SEBI LODR & NFRA
+- CSR Tokenism, Automation Ethics & ESG Greenwashing Integrity
+- Global Probity Architecture - UNCAC (2003), OECD Anti-Bribery & Extraterritorial Integrity
+
+---
+
+### [[9. Ethics in International Relations, Just War Theory, Refugees & Global Distributive Justice|Chapter 9: Ethics in International Relations, Just War Theory, Refugees & Global Distributive Justice]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 & Essay Synthesis · **Verified:** 2026-11-23
+
+- Normative Paradigms in International Relations - Realism, Liberalism & Cosmopolitanism
+- Just War Theory (*Bellum Justum*), Supreme Emergency & Humanitarian Intervention (R2P)
+- Borders, Refugees & Foreign Aid Ethics - *Non-Refoulement*, Lifeboats & Aid Distortions
+- Global Distributive Justice, Climate Debt, Vaccines, Sanctions & Autonomous Warfare
+
+---
+
+### [[10. Applied & Frontier Ethics — Bioethics, Medical Consent, Eco-Ethics & AI Policing-Welfare|Chapter 10: Applied & Frontier Ethics — Bioethics, Medical Consent, Eco-Ethics & AI Policing/Welfare]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Analytical Mains GS4 Deep Dive (Directly Calibrated to Mains 2026 Frontier Case Studies) · **Verified:** 2026-11-23
+
+- Biomedical & Clinical Ethics - Principlism, Informed Consent & Life-Boundary Dilemmas
+- Environmental & Animal Philosophy - From Anthropocentrism to Urban Coexistence
+- Media, Judicial & Sports Ethics - Epistemic Decay, Instant Justice & Sporting Integrity
+- Frontier AI & Algorithmic Ethics - Predictive Policing, Automated Welfare, Surveillance Capitalism & Judicial AI
+
+---
+
+### [[11. Ethical Dilemmas in Public Administration, Case-Study Frameworks & Moral Decision-Making Models|Chapter 11: Ethical Dilemmas in Public Administration, Case-Study Frameworks & Moral Decision-Making Models]]
+> **Paper:** GS4, Prelims, Essay · **Rubric:** Applied GS4 Section B Engine + Prelims Situational Decision-Making Heuristics · **Verified:** 2026-11-23
+
+- Anatomy of a Genuine Ethical Dilemma - Right vs. Right vs. Moral Temptation
+- Rushworth Kidder’s Four Right-vs-Right Paradigms
+- Five Recurring Indian Administrative Conflict Matrices
+- Structured Decision-Making Architecture - Cooper, Potter Box & The 5-Step Protocol
+- Cracking Prelims GS-I Situational Ethics & Administrative Judgment Under Ambiguity
 
 <!-- OBSIDIAN-WEB-START -->
 ---
