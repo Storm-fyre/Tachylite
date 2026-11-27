@@ -15,6 +15,27 @@
       }
     },
     {
+      "query": "tag:#physics-subject-hub",
+      "color": {
+        "a": 1,
+        "rgb": 15857145
+      }
+    },
+    {
+      "query": "path:\"Physics/Paper 1\"",
+      "color": {
+        "a": 1,
+        "rgb": 10741301
+      }
+    },
+    {
+      "query": "path:\"Physics/Paper 2\"",
+      "color": {
+        "a": 1,
+        "rgb": 15235577
+      }
+    },
+    {
       "query": "path:\"Good to Know\"",
       "color": {
         "a": 1,

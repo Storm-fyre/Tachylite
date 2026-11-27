@@ -1,0 +1,20 @@
+Root Folder: Tachylite
+======================
+Tachylite/
+├── .git/  [contents skipped]
+├── .github/  [contents skipped]
+├── scripts/
+│   └── index-vaults.mjs
+├── src/
+│   ├── App.jsx
+│   ├── GraphView.jsx
+│   ├── obsidian.css
+│   └── Reader.jsx
+├── vaults/  [contents skipped]
+├── .gitattributes
+├── .gitignore
+├── index.html
+└── package.json
+
+----------------------------------------
+Total Folders: 5 | Total Files: 9 | Skipped: 3
