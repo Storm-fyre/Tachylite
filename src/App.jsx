@@ -14,13 +14,11 @@ import {
   Folder,
   FolderOpen,
   GitFork,
-  Moon,
   PanelLeft,
   PanelRight,
   Plus,
   Search,
   SlidersHorizontal,
-  Sun,
   Tag,
   X,
   Zap,
@@ -34,10 +32,18 @@ const BOOKMARKS_PREFIX = 'obsidian-web-bookmarks-';
 
 const DEFAULT_PREFS = {
   theme: 'dark',
+  pitchBlackGraph: true,
   fontSize: 16,
   fontFamily: 'sans',
   readableWidth: true,
 };
+
+const THEME_OPTIONS = [
+  { id: 'dark', label: 'Dark', dot: '#262626' },
+  { id: 'pitch-black', label: 'Pitch Black', dot: '#000000' },
+  { id: 'warm', label: 'Warm', dot: '#e8dac3' },
+  { id: 'light', label: 'Light', dot: '#f5f5f5' },
+];
 
 function loadPrefs() {
   try {
@@ -201,7 +207,6 @@ function App() {
   const settingsRef = useRef(null);
   const searchInputRef = useRef(null);
 
-  // Refs for clean popstate & navigation synchronization
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
   const historyRef = useRef(history);
@@ -241,7 +246,14 @@ function App() {
     return vaultIndex.notes.find((n) => n.path === activeNotePath) || null;
   }, [vaultIndex, activeNotePath]);
 
-  // Remember last opened note for GraphView's highlight & Crosshair locate
+  const effectivePitchBlackGraph = Boolean(
+    prefs.pitchBlackGraph || prefs.theme === 'pitch-black'
+  );
+
+  const handleTogglePitchBlackGraph = useCallback((nextVal) => {
+    setPrefs((p) => ({ ...p, pitchBlackGraph: Boolean(nextVal) }));
+  }, []);
+
   useEffect(() => {
     if (activeNotePath) {
       setLastOpenedNotePath(activeNotePath);
@@ -252,7 +264,6 @@ function App() {
     setActiveHeadingSlug(null);
   }, [activeNotePath]);
 
-  // Dynamically update browser tab title per active chapter / graph
   useEffect(() => {
     if (!activeVaultId || !vaultIndex) {
       document.title = 'Tachylite';
@@ -267,7 +278,7 @@ function App() {
     }
   }, [activeVaultId, vaultIndex, activeTab?.type, activeNoteMeta, displayVaultName]);
 
-  // Apply reading preferences & mobile theme-color meta tag
+  // Apply reading preferences & mobile theme-color meta tag across all 4 themes
   useEffect(() => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
@@ -286,11 +297,20 @@ function App() {
 
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     if (themeMeta) {
-      themeMeta.setAttribute('content', prefs.theme === 'light' ? '#f5f5f5' : '#1e1e1e');
+      const metaColorMap = {
+        'pitch-black': '#000000',
+        dark: '#1e1e1e',
+        warm: '#ebe0ce',
+        light: '#f5f5f5',
+      };
+      const color =
+        activeTab?.type === 'graph' && effectivePitchBlackGraph
+          ? '#000000'
+          : metaColorMap[prefs.theme] || '#1e1e1e';
+      themeMeta.setAttribute('content', color);
     }
-  }, [prefs]);
+  }, [prefs, activeTab?.type, effectivePitchBlackGraph]);
 
-  // Close reading popover when clicking outside
   useEffect(() => {
     if (!showSettings) return;
     function onDocClick(e) {
@@ -302,7 +322,6 @@ function App() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [showSettings]);
 
-  // Global keyboard shortcuts: Ctrl/Cmd+K/O for Quick Switcher, Ctrl/Cmd+F for In-File Find
   useEffect(() => {
     function onKeyDown(e) {
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'o')) {
@@ -319,7 +338,6 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [vaultIndex, activeTab?.type]);
 
-  // Load manifest on startup
   useEffect(() => {
     fetch('./vault-data/manifest.json')
       .then((res) => {
@@ -339,7 +357,6 @@ function App() {
       .catch((err) => setManifestError(err.message));
   }, []);
 
-  // Expand parent folders so active note is visible in File Explorer
   const revealPathInTree = useCallback((notePath) => {
     const parts = notePath.split('/');
     if (parts.length <= 1) return;
@@ -352,7 +369,6 @@ function App() {
     });
   }, []);
 
-  // Navigate to a history entry in-place (never spawns duplicate tabs on Back/Forward)
   const applyNavigationEntry = useCallback(
     (entry) => {
       if (!entry) return;
@@ -384,7 +400,6 @@ function App() {
           setActiveTabId(existing.id);
           return;
         }
-        // Replace the currently active note tab cleanly in-place instead of spawning extra tabs
         if (currentActive && currentActive.type === 'note') {
           setTabs((prev) =>
             prev.map((t) =>
@@ -409,7 +424,6 @@ function App() {
     [revealPathInTree]
   );
 
-  // Unified Browser / Android Back & Forward handler
   useEffect(() => {
     const onPopState = (e) => {
       if (ignoreNextPopRef.current) {
@@ -420,7 +434,6 @@ function App() {
       const ov = overlaysRef.current;
       const isMobile = window.innerWidth <= 768;
 
-      // On Android / browser Back: close open modals or mobile drawers FIRST before leaving current note
       if (
         ov.showQuickSwitcher ||
         ov.findOpen ||
@@ -448,7 +461,6 @@ function App() {
         return;
       }
 
-      // Fallback for manual URL hash edits or external back/forward states
       const parsed = parseHash();
       const idxData = vaultIndexRef.current;
       if (!idxData) return;
@@ -472,7 +484,6 @@ function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [applyNavigationEntry]);
 
-  // Load selected vault index
   useEffect(() => {
     if (!activeVaultId) {
       setVaultIndex(null);
@@ -554,7 +565,6 @@ function App() {
     };
   }, [activeVaultId, revealPathInTree]);
 
-  // Fetch a note JSON payload (cached)
   const fetchNote = useCallback(
     async (notePath) => {
       if (!activeVaultId || !notePath) return null;
@@ -573,7 +583,6 @@ function App() {
     [activeVaultId]
   );
 
-  // Load note content whenever active note tab changes
   useEffect(() => {
     if (!activeNotePath) {
       setNoteData(null);
@@ -596,7 +605,6 @@ function App() {
     };
   }, [activeNotePath, fetchNote]);
 
-  // Lazy-load full-text search index when Search tab is opened
   useEffect(() => {
     if (!activeVaultId || leftTab !== 'search' || searchCorpus) return;
     fetch(`./vault-data/${encodeURIComponent(activeVaultId)}/search.json`)
@@ -605,7 +613,6 @@ function App() {
       .catch(() => {});
   }, [activeVaultId, leftTab, searchCorpus]);
 
-  // Push unified history entry (app history + browser pushState)
   const pushNavigation = useCallback((entry) => {
     const vId = activeVaultIdRef.current;
     if (!vId || !entry) return;
@@ -673,7 +680,6 @@ function App() {
     [revealPathInTree, pushNavigation]
   );
 
-  // Stable callback for GraphView so outer App re-renders never tear down canvas listeners
   const handleGraphSelectNote = useCallback(
     (path, newTab) => {
       openNote(path, null, newTab);
@@ -811,13 +817,11 @@ function App() {
     setTimeout(() => searchInputRef.current?.focus(), 50);
   }, []);
 
-  // Sorted vault-wide tags for Left Sidebar (Macro)
   const sortedVaultTags = useMemo(() => {
     const entries = Object.entries(vaultIndex?.tags || {});
     return entries.sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
   }, [vaultIndex?.tags]);
 
-  // Search computation
   const searchResults = useMemo(() => {
     if (!vaultIndex) return [];
     const rawQ = searchQuery.trim();
@@ -872,7 +876,6 @@ function App() {
     return results.slice(0, 60);
   }, [vaultIndex, searchQuery, searchCorpus]);
 
-  // Detect Mother Chapter <-> Quick Summary counterpart automatically (if present)
   const pairedNote = useMemo(() => {
     if (!vaultIndex || !activeNoteMeta) return null;
     const summarySuffix = ' - Summary';
@@ -897,7 +900,6 @@ function App() {
     ? Math.max(1, Math.round((activeNoteMeta.wordCount || 0) / 220))
     : 0;
 
-  // 1. Loading / Error / Multi-Vault Hub states
   if (manifestError) {
     return (
       <div className="obs-vault-hub">
@@ -955,7 +957,6 @@ function App() {
   return (
     <div className="obs-app">
       <div className="obs-workspace">
-        {/* Mobile drawer backdrop */}
         {(leftOpen || rightOpen) && (
           <div
             className="obs-mobile-backdrop"
@@ -966,7 +967,6 @@ function App() {
           />
         )}
 
-        {/* LEFT SIDEBAR (Vault-Wide / Macro: Files, Search, Bookmarks, Tags) */}
         {leftOpen && (
           <aside className="obs-sidebar obs-sidebar--left">
             <div className="obs-sidebar-tabs">
@@ -1190,9 +1190,7 @@ function App() {
           </aside>
         )}
 
-        {/* MAIN CENTER WORKSPACE */}
         <main className="obs-main">
-          {/* Top Tab Bar */}
           <div className="obs-tab-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1 }}>
               {!leftOpen && (
@@ -1271,7 +1269,6 @@ function App() {
             </div>
           </div>
 
-          {/* View Header / Breadcrumbs */}
           <div className="obs-view-header">
             <div className="obs-view-nav">
               <button
@@ -1348,7 +1345,7 @@ function App() {
               <button
                 className={`obs-icon-btn ${showSettings ? 'is-active' : ''}`}
                 onClick={() => setShowSettings((s) => !s)}
-                title="Reading appearance & font size"
+                title="Reading appearance & themes"
               >
                 <SlidersHorizontal size={15} />
               </button>
@@ -1393,6 +1390,38 @@ function App() {
                     </div>
                   </div>
 
+                  <div className="obs-slider-row" style={{ marginBottom: 8 }}>
+                    <span>Reading theme</span>
+                    <div className="obs-theme-grid">
+                      {THEME_OPTIONS.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className={`obs-theme-btn ${prefs.theme === t.id ? 'is-active' : ''}`}
+                          onClick={() => setPrefs((p) => ({ ...p, theme: t.id }))}
+                        >
+                          <span
+                            className="obs-theme-swatch"
+                            style={{ background: t.dot }}
+                          />
+                          <span>{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="obs-toggle-row">
+                    <span>Pitch-black graph canvas</span>
+                    <input
+                      type="checkbox"
+                      checked={effectivePitchBlackGraph}
+                      disabled={prefs.theme === 'pitch-black'}
+                      onChange={(e) =>
+                        setPrefs((p) => ({ ...p, pitchBlackGraph: e.target.checked }))
+                      }
+                    />
+                  </label>
+
                   <label className="obs-toggle-row">
                     <span>Readable line length</span>
                     <input
@@ -1403,25 +1432,11 @@ function App() {
                       }
                     />
                   </label>
-
-                  <div
-                    className="obs-toggle-row"
-                    onClick={() =>
-                      setPrefs((p) => ({ ...p, theme: p.theme === 'dark' ? 'light' : 'dark' }))
-                    }
-                  >
-                    <span>Theme</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      {prefs.theme === 'dark' ? <Moon size={13} /> : <Sun size={13} />}
-                      {prefs.theme === 'dark' ? 'Dark' : 'Light'}
-                    </span>
-                  </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Active Pane Content (Global Graph stays mounted across tab switches) */}
           <div className="obs-pane-content">
             {vaultIndex && (
               <div
@@ -1431,6 +1446,8 @@ function App() {
                   vaultIndex={vaultIndex}
                   mode="global"
                   isVisible={activeTab?.type === 'graph'}
+                  pitchBlackGraph={effectivePitchBlackGraph}
+                  onTogglePitchBlackGraph={handleTogglePitchBlackGraph}
                   activeNotePath={activeNotePath}
                   focusNotePath={lastOpenedNotePath}
                   focusRevision={focusRevision}
@@ -1461,7 +1478,6 @@ function App() {
           </div>
         </main>
 
-        {/* RIGHT SIDEBAR INSPECTOR (Current Chapter / Micro: Outline, Backlinks, Outgoing, Local Graph) */}
         {rightOpen && vaultIndex && (
           <RightInspector
             vaultIndex={vaultIndex}
@@ -1470,13 +1486,13 @@ function App() {
             activeHeadingSlug={activeHeadingSlug}
             rightTab={rightTab}
             setRightTab={setRightTab}
+            pitchBlackGraph={effectivePitchBlackGraph}
             onClose={handleCloseRightSidebar}
             onNavigateNote={openNote}
           />
         )}
       </div>
 
-      {/* BOTTOM STATUS BAR */}
       <footer className="obs-status-bar">
         <div className="obs-status-left">
           <button
@@ -1539,7 +1555,6 @@ function App() {
         </div>
       </footer>
 
-      {/* QUICK SWITCHER MODAL (Ctrl+K) */}
       {showQuickSwitcher && vaultIndex && (
         <QuickSwitcherModal
           notes={vaultIndex.notes}

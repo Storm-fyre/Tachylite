@@ -136,8 +136,6 @@ function splitWikiPipe(inner) {
   return [targetPart, aliasPart];
 }
 
-// Escape bare unescaped % inside LaTeX math (e.g. $+52%$, $20%\text{–}40%$)
-// so KaTeX renders literal percent signs instead of treating % as a comment.
 function sanitizeLatex(tex) {
   return String(tex).replace(/\\.|%/g, (m) => (m === '%' ? '\\%' : m));
 }
@@ -155,10 +153,7 @@ function renderLatexToHtml(tex, displayMode) {
   }
 }
 
-// Extract and pre-render block ($$...$$) and inline ($...$) LaTeX math safely
-// without breaking normal dollar currency amounts like "$50 billion to $100 billion".
 function extractMathPlaceholders(text, mathStore) {
-  // 1. Block math: $$ ... $$ (single-line or multi-line)
   let out = text.replace(/(^|[^\\])\$\$([\s\S]+?)\$\$/g, (full, prefix, tex) => {
     if (!tex.trim()) return full;
     const idx = mathStore.length;
@@ -170,7 +165,6 @@ function extractMathPlaceholders(text, mathStore) {
     return `${prefix}${BLOCK_MATH_OPEN}${idx}${BLOCK_MATH_CLOSE}`;
   });
 
-  // 2. Inline math: $...$ (single line, no leading/trailing space, closing $ not followed by digit)
   out = out.replace(
     /(^|[^\\$])\$(?!\s)((?:\\.|[^$\\\r\n])+?)(?<!\s)\$(?!\d)/g,
     (full, prefix, tex) => {
@@ -191,7 +185,6 @@ function extractMathPlaceholders(text, mathStore) {
 function restoreMathPlaceholders(html, mathStore) {
   if (!mathStore.length) return html;
   let out = html;
-  // Unwrap standalone block math from <p>...</p> for valid HTML layout
   out = out.replace(
     new RegExp(`<p>\\s*${BLOCK_MATH_OPEN}(\\d+)${BLOCK_MATH_CLOSE}\\s*<\\/p>`, 'g'),
     (_, idx) => mathStore[Number(idx)]?.html ?? ''
@@ -228,19 +221,15 @@ function preprocessObsidianMarkdown(body, resolvedLinks = {}, vaultNotesMap, mat
     return token;
   };
 
-  // 1. Protect fenced code blocks and inline code FIRST so nothing touches code/Mermaid
   let text = body
     .replace(/```[\s\S]*?```/g, (m) => protectCode(m))
     .replace(/~~~[\s\S]*?~~~/g, (m) => protectCode(m))
     .replace(/`[^`\n]+`/g, (m) => protectCode(m));
 
-  // 2. Extract & pre-render LaTeX math (protected from Markdown emphasis/escaping)
   text = extractMathPlaceholders(text, mathStore);
 
-  // 3. Highlight ==text==
   text = text.replace(/==([^=\n]+)==/g, '<mark class="obs-highlight">$1</mark>');
 
-  // 4. Embeds: ![[target|option]]
   text = text.replace(/!\[\[([^\]]+)\]\]/g, (full, rawInner) => {
     const inner = rawInner.trim();
     const [targetPart, optionPart] = splitWikiPipe(inner);
@@ -281,7 +270,6 @@ function preprocessObsidianMarkdown(body, resolvedLinks = {}, vaultNotesMap, mat
     return `<span class="internal-link is-unresolved">${escapeHtml(inner)}</span>`;
   });
 
-  // 5. Wikilinks: [[target#heading|alias]] and table-escaped [[target\|alias]]
   text = text.replace(/\[\[([^\]]+)\]\]/g, (full, rawInner) => {
     const inner = rawInner.trim();
     const [targetPart, aliasPart] = splitWikiPipe(inner);
@@ -320,7 +308,6 @@ function preprocessObsidianMarkdown(body, resolvedLinks = {}, vaultNotesMap, mat
     )}</a>`;
   });
 
-  // 6. Inline #tags (protects existing HTML tags so attributes/hex colors aren't broken)
   const htmlTagStore = [];
   text = text.replace(/<[^>]+>/g, (tagStr) => {
     const token = `\uE000H${htmlTagStore.length}\uE001`;
@@ -336,8 +323,6 @@ function preprocessObsidianMarkdown(body, resolvedLinks = {}, vaultNotesMap, mat
   });
 
   text = text.replace(/\uE000H(\d+)\uE001/g, (_, idx) => htmlTagStore[Number(idx)] ?? '');
-
-  // 7. Restore code blocks so marked renders them (including Mermaid detection)
   text = text.replace(/\uE000C(\d+)\uE001/g, (_, idx) => codeStore[Number(idx)] ?? '');
   return text;
 }
@@ -405,19 +390,24 @@ function renderObsidianMarkdown(noteData, vaultNotesMap, options = {}) {
       blockquote({ tokens }) {
         const innerHtml = this.parser.parse(tokens);
         const calloutMatch = innerHtml.match(
-          /^<p>\s*\[!([a-zA-Z0-9_-]+)\][+-]?(?:[ \t]+([^\n<]*))?(?:<br\s*\/?>|\n)?([\s\S]*?)<\/p>([\s\S]*)$/
+          /^<p>\s*\[!([a-zA-Z0-9_-]+)\]([+-])?(?:[ \t]+([^\n<]*))?(?:<br\s*\/?>|\n)?([\s\S]*?)<\/p>([\s\S]*)$/
         );
         if (calloutMatch) {
           const type = calloutMatch[1].toLowerCase();
-          const customTitle = calloutMatch[2]?.trim();
-          const firstParaRest = calloutMatch[3]?.trim();
-          const restBlocks = calloutMatch[4] || '';
+          const foldSign = calloutMatch[2] || '';
+          const customTitle = calloutMatch[3]?.trim();
+          const firstParaRest = calloutMatch[4]?.trim();
+          const restBlocks = calloutMatch[5] || '';
           const color = CALLOUT_COLORS[type] || CALLOUT_COLORS.note;
           const title = customTitle || type;
           const bodyHtml = `${firstParaRest ? `<p>${firstParaRest}</p>` : ''}${restBlocks}`;
-          return `<div class="obs-callout" style="--callout-color:${color}"><div class="obs-callout-title">${escapeHtml(
-            title
-          )}</div><div class="obs-callout-body">${bodyHtml}</div></div>\n`;
+
+          if (!isPreview && (foldSign === '-' || foldSign === '+')) {
+            const openAttr = foldSign === '+' ? ' open' : '';
+            return `<details class="obs-callout is-collapsible"${openAttr} style="--callout-color:${color}"><summary class="obs-callout-title obs-callout-summary"><span class="obs-callout-chevron">${FOLD_CHEVRON_SVG}</span><span>${title}</span></summary><div class="obs-callout-body">${bodyHtml}</div></details>\n`;
+          }
+
+          return `<div class="obs-callout" style="--callout-color:${color}"><div class="obs-callout-title">${title}</div><div class="obs-callout-body">${bodyHtml}</div></div>\n`;
         }
         return `<blockquote>${innerHtml}</blockquote>\n`;
       },
@@ -465,17 +455,14 @@ function renderObsidianMarkdown(noteData, vaultNotesMap, options = {}) {
 
   let html = String(md.parse(preprocessed));
 
-  // Restore pre-rendered KaTeX HTML AFTER marked finishes
   html = restoreMathPlaceholders(html, mathStore);
 
-  // Wrap tables in an independent horizontal scroll container
   if (!isPreview) {
     html = html
       .replace(/<table(\s[^>]*)?>/g, '<div class="obs-table-wrap"><table$1>')
       .replace(/<\/table>/g, '</table></div>');
   }
 
-  // Strip unsafe script tags or inline event attributes
   return html
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/\son\w+=(?:"[^"]*"|'[^']*')/gi, '');
@@ -501,7 +488,6 @@ function buildPreviewHtml(fullNote, vaultNotesMap) {
   );
 }
 
-// Detect whether the note body already starts with an H1 repeating the filename title
 function bodyStartsWithMatchingH1(noteData) {
   if (!noteData?.body || !noteData?.title) return false;
   const trimmed = noteData.body.replace(/^\s*(?:<!--[\s\S]*?-->\s*)*/, '');
@@ -524,14 +510,12 @@ function bodyStartsWithMatchingH1(noteData) {
 
 function formatPropertyValue(val) {
   const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
-  // Clean ISO midnight UTC dates (e.g. 2026-11-21T00:00:00.000Z -> 2026-11-21)
   if (/^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/i.test(str)) {
     return str.slice(0, 10);
   }
   return str;
 }
 
-// Render simple inline **bold** and *italic* cleanly inside property strings
 function renderInlinePropertyText(text) {
   const tokens = String(text).split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
   return tokens.map((part, idx) => {
@@ -546,7 +530,6 @@ function renderInlinePropertyText(text) {
 }
 
 function PropertiesBox({ properties, onSearchTag }) {
-  // Default collapsed so the chapter prose starts right near the top
   const [collapsed, setCollapsed] = useState(true);
 
   const entries = useMemo(() => {
@@ -627,7 +610,6 @@ function PropertiesBox({ properties, onSearchTag }) {
   );
 }
 
-// Clear all in-file find highlight <mark> nodes cleanly without disturbing sibling elements
 function clearFindHighlights(rootEl) {
   if (!rootEl) return;
   const marks = rootEl.querySelectorAll('mark.obs-find-match');
@@ -642,7 +624,6 @@ function clearFindHighlights(rootEl) {
   parents.forEach((p) => p.normalize());
 }
 
-// Highlight case-insensitive matches inside readable text nodes (skipping KaTeX MathML & Mermaid SVGs)
 function applyFindHighlights(rootEl, query) {
   if (!rootEl || !query) return [];
   const needle = query.toLowerCase();
@@ -734,7 +715,6 @@ export default function Reader({
     () => document.documentElement.getAttribute('data-theme') || 'dark'
   );
 
-  // In-File Find state
   const [findQuery, setFindQuery] = useState('');
   const [findCount, setFindCount] = useState(0);
   const [findIdx, setFindIdx] = useState(0);
@@ -752,7 +732,6 @@ export default function Reader({
     [noteData, vaultNotesMap]
   );
 
-  // Memoize object identity so React never wipes Mermaid SVGs, folded classes, or Find marks on unrelated renders
   const markdownInnerHtml = useMemo(() => ({ __html: renderedHtml }), [renderedHtml]);
 
   const hideDuplicateTopTitle = useMemo(() => bodyStartsWithMatchingH1(noteData), [noteData]);
@@ -761,7 +740,6 @@ export default function Reader({
     ? `${vaultId || vaultIndex?.id || 'default'}::${noteData.path}`
     : null;
 
-  // Track theme changes for Mermaid re-rendering
   useEffect(() => {
     const obs = new MutationObserver(() => {
       setDocTheme(document.documentElement.getAttribute('data-theme') || 'dark');
@@ -773,12 +751,10 @@ export default function Reader({
     return () => obs.disconnect();
   }, []);
 
-  // Reset folded sections when switching notes
   useEffect(() => {
     setFoldedHeadings(new Set());
   }, [noteData?.path]);
 
-  // Focus In-File Find input when opened; clean up highlights when closed
   useEffect(() => {
     if (findOpen) {
       requestAnimationFrame(() => {
@@ -793,7 +769,6 @@ export default function Reader({
     }
   }, [findOpen]);
 
-  // Lazy-render Mermaid diagrams whenever note HTML or Dark/Light theme changes
   useEffect(() => {
     const mdEl = markdownRef.current;
     if (!mdEl) return;
@@ -801,6 +776,7 @@ export default function Reader({
     if (wrappers.length === 0) return;
 
     let cancelled = false;
+    const isLightTheme = docTheme === 'light' || docTheme === 'warm';
 
     import('mermaid')
       .then(async (mod) => {
@@ -808,7 +784,7 @@ export default function Reader({
         const mermaid = mod.default || mod;
         mermaid.initialize({
           startOnLoad: false,
-          theme: docTheme === 'light' ? 'default' : 'dark',
+          theme: isLightTheme ? 'default' : 'dark',
           securityLevel: 'loose',
           flowchart: { useMaxWidth: true, htmlLabels: true },
         });
@@ -848,7 +824,6 @@ export default function Reader({
     };
   }, [renderedHtml, docTheme]);
 
-  // Apply section folding classes cleanly to sibling elements in .obs-markdown
   useEffect(() => {
     const mdEl = markdownRef.current;
     if (!mdEl) return;
@@ -894,17 +869,24 @@ export default function Reader({
     }
   }, [renderedHtml, foldedHeadings]);
 
-  // Helper to automatically unfold any folded section hiding a target DOM element
   const ensureElementUnfolded = useCallback((el) => {
     const mdEl = markdownRef.current;
     if (!mdEl || !el) return;
+
+    // 1. Open any collapsed <details class="obs-callout"> wrapping the target
+    let detailsEl = el.closest('details.obs-callout');
+    while (detailsEl) {
+      detailsEl.open = true;
+      detailsEl = detailsEl.parentElement?.closest('details.obs-callout');
+    }
+
+    // 2. Unfold any folded markdown heading section hiding the target
     let topChild = el;
     while (topChild && topChild.parentElement && topChild.parentElement !== mdEl) {
       topChild = topChild.parentElement;
     }
     if (!topChild || !topChild.classList.contains('obs-section-folded')) return;
 
-    // Walk backward to collect all folded ancestor headings above topChild
     const toUnfold = [];
     let sibling = topChild.previousElementSibling;
     let minLevelSeen = 99;
@@ -928,7 +910,6 @@ export default function Reader({
     }
   }, []);
 
-  // Run In-File Find highlights whenever query / note changes while Find bar is open
   useEffect(() => {
     if (!findOpen) return;
     const rootEl = articleRef.current;
@@ -989,7 +970,6 @@ export default function Reader({
       setProgressPct(pct);
       setShowBackToTop(container.scrollTop > 420);
 
-      // Live Outline Scroll-Spy
       if (onActiveHeadingChange) {
         const headingEls = container.querySelectorAll(
           '.obs-markdown h1[id], .obs-markdown h2[id], .obs-markdown h3[id], .obs-markdown h4[id], .obs-markdown h5[id], .obs-markdown h6[id]'
@@ -1021,7 +1001,6 @@ export default function Reader({
     [onActiveHeadingChange]
   );
 
-  // Restore saved scroll position OR jump cleanly to a fresh target heading
   useEffect(() => {
     const container = scrollRef.current;
     if (!container || !noteData) return;
@@ -1092,7 +1071,6 @@ export default function Reader({
   };
 
   const handleContentClick = async (e) => {
-    // 1. Fold / Unfold heading toggle
     const foldBtn = e.target.closest('[data-fold-toggle]');
     if (foldBtn) {
       e.preventDefault();
@@ -1109,7 +1087,6 @@ export default function Reader({
       return;
     }
 
-    // 2. Hover Copy button on code/ASCII blocks
     const copyBtn = e.target.closest('[data-copy-code]');
     if (copyBtn) {
       e.preventDefault();
@@ -1139,7 +1116,6 @@ export default function Reader({
       return;
     }
 
-    // 3. Inline tag click
     const tagBtn = e.target.closest('[data-tag]');
     if (tagBtn) {
       e.preventDefault();
@@ -1147,7 +1123,6 @@ export default function Reader({
       return;
     }
 
-    // 4. Internal wikilink / heading link
     const link = e.target.closest('.internal-link');
     if (!link) return;
     e.preventDefault();
@@ -1251,12 +1226,10 @@ export default function Reader({
 
   return (
     <>
-      {/* 2px Top Reading Progress Bar */}
       <div className="obs-progress-track" aria-hidden="true">
         <div className="obs-progress-fill" style={{ width: `${progressPct}%` }} />
       </div>
 
-      {/* In-File Find Bar */}
       {findOpen && (
         <div className="obs-find-bar">
           <Search size={14} color="var(--text-faint)" style={{ flexShrink: 0 }} />
@@ -1335,7 +1308,6 @@ export default function Reader({
         </article>
       </div>
 
-      {/* Floating Back-to-Top Button */}
       {showBackToTop && (
         <button
           type="button"
@@ -1347,7 +1319,6 @@ export default function Reader({
         </button>
       )}
 
-      {/* Formatted Desktop Hover Preview */}
       {hoverPreview && (
         <div
           className="obs-hover-preview"
@@ -1386,6 +1357,7 @@ export function RightInspector({
   activeHeadingSlug = null,
   rightTab,
   setRightTab,
+  pitchBlackGraph = true,
   onClose,
   onNavigateNote,
 }) {
@@ -1399,7 +1371,6 @@ export function RightInspector({
     [headings]
   );
 
-  // Keep active outline item softly scrolled into view inside the Right Inspector
   useEffect(() => {
     if (rightTab !== 'outline' || !activeHeadingSlug || !outlineListRef.current) return;
     const activeEl = outlineListRef.current.querySelector(
@@ -1420,7 +1391,6 @@ export function RightInspector({
   const jumpToHeading = (slug) => {
     const el = document.querySelector(`.obs-reader-scroll [id="${CSS.escape(slug)}"]`);
     if (el) {
-      // Unfold any folded parent section if needed
       if (el.classList.contains('obs-section-folded')) {
         let sib = el.previousElementSibling;
         while (sib) {
@@ -1576,6 +1546,7 @@ export function RightInspector({
                 <GraphView
                   vaultIndex={vaultIndex}
                   mode="local"
+                  pitchBlackGraph={pitchBlackGraph}
                   activeNotePath={activeNotePath}
                   onSelectNote={handleLocalNavigate}
                 />

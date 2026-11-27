@@ -39,6 +39,78 @@
   --graph-text: #d4d4d4;
 }
 
+[data-theme='pitch-black'] {
+  --bg-primary: #000000;
+  --bg-primary-alt: #0a0a0a;
+  --bg-secondary: #0c0c0c;
+  --bg-secondary-alt: #050505;
+  --bg-modifier-hover: rgba(255, 255, 255, 0.08);
+  --bg-modifier-active: rgba(255, 255, 255, 0.14);
+  --bg-modifier-selected: rgba(139, 92, 246, 0.24);
+  --border-color: #242424;
+  --border-subtle: #181818;
+
+  --text-normal: #e0e0e0;
+  --text-bright: #ffffff;
+  --text-muted: #969696;
+  --text-faint: #5e5e5e;
+  --text-accent: #b39dfa;
+  --text-accent-hover: #d2c4ff;
+  --interactive-accent: #7f6df2;
+  --interactive-accent-hover: #9282f8;
+
+  --tag-bg: rgba(139, 92, 246, 0.18);
+  --tag-color: #c4b5fd;
+  --code-bg: #121212;
+  --blockquote-border: #7f6df2;
+  --highlight-bg: rgba(255, 208, 0, 0.26);
+  --find-match-bg: rgba(255, 208, 0, 0.28);
+  --find-current-bg: rgba(249, 115, 22, 0.65);
+  --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.85);
+
+  --graph-node: #a0a0a0;
+  --graph-node-unresolved: #454545;
+  --graph-line: rgba(165, 165, 165, 0.25);
+  --graph-line-active: rgba(168, 139, 250, 0.94);
+  --graph-text: #dadada;
+}
+
+[data-theme='warm'] {
+  --bg-primary: #f5ede0;
+  --bg-primary-alt: #efe5d4;
+  --bg-secondary: #ebe0ce;
+  --bg-secondary-alt: #e2d5c1;
+  --bg-modifier-hover: rgba(60, 40, 20, 0.06);
+  --bg-modifier-active: rgba(60, 40, 20, 0.11);
+  --bg-modifier-selected: rgba(139, 92, 246, 0.13);
+  --border-color: #d6c7b0;
+  --border-subtle: #e0d3be;
+
+  --text-normal: #2c2219;
+  --text-bright: #18110a;
+  --text-muted: #6e5d4f;
+  --text-faint: #9a8877;
+  --text-accent: #6842c2;
+  --text-accent-hover: #5330a8;
+  --interactive-accent: #7348d4;
+  --interactive-accent-hover: #5f37b8;
+
+  --tag-bg: rgba(115, 72, 212, 0.11);
+  --tag-color: #5f37b8;
+  --code-bg: #e7dbc7;
+  --blockquote-border: #7348d4;
+  --highlight-bg: rgba(245, 180, 0, 0.32);
+  --find-match-bg: rgba(245, 180, 0, 0.38);
+  --find-current-bg: rgba(234, 88, 12, 0.48);
+  --shadow-lg: 0 12px 32px rgba(45, 30, 15, 0.15);
+
+  --graph-node: #6e5d4f;
+  --graph-node-unresolved: #bfb09c;
+  --graph-line: rgba(110, 93, 79, 0.26);
+  --graph-line-active: rgba(115, 72, 212, 0.85);
+  --graph-text: #2c2219;
+}
+
 [data-theme='light'] {
   --bg-primary: #ffffff;
   --bg-primary-alt: #fafafa;
@@ -607,7 +679,6 @@ body,
   display: none;
 }
 
-/* 2px Top Reading Progress Bar */
 .obs-progress-track {
   position: absolute;
   top: 0;
@@ -724,9 +795,6 @@ mark.obs-find-match.is-current {
   color: var(--text-normal);
 }
 
-/* Smart Readable Line Length:
-   Prose stays centered at --reader-max-width (740px), while wide ASCII/code blocks,
-   Mermaid diagrams, and wide tables expand symmetrically into the open horizontal margins. */
 .obs-reader-container.is-readable-width {
   max-width: 100%;
 }
@@ -1215,7 +1283,7 @@ mark.obs-find-match.is-current {
   cursor: pointer;
 }
 
-/* Obsidian Callouts */
+/* Obsidian Callouts (Static & Collapsible <details>) */
 .obs-callout {
   margin: 1em 0;
   padding: 10px 14px;
@@ -1229,7 +1297,41 @@ mark.obs-find-match.is-current {
   font-size: 0.94em;
   color: var(--callout-color, #448aff);
   margin-bottom: 4px;
-  text-transform: capitalize;
+}
+
+details.obs-callout.is-collapsible {
+  padding: 8px 14px;
+}
+
+.obs-callout-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  margin-bottom: 0;
+}
+
+.obs-callout-summary::-webkit-details-marker {
+  display: none;
+}
+
+.obs-callout-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.16s ease;
+  transform: rotate(-90deg);
+}
+
+details.obs-callout.is-collapsible[open] > .obs-callout-summary {
+  margin-bottom: 8px;
+}
+
+details.obs-callout.is-collapsible[open] > .obs-callout-summary .obs-callout-chevron {
+  transform: rotate(0deg);
 }
 
 .obs-callout-body > :first-child {
@@ -1383,13 +1485,13 @@ mark.obs-find-match.is-current {
 }
 
 /* =========================================================
-   Popovers, Hover Preview & Quick Switcher
+   Popovers, 4-Theme Selector, Hover Preview & Quick Switcher
    ========================================================= */
 .obs-popover {
   position: absolute;
   top: 38px;
   right: 0;
-  width: 265px;
+  width: 272px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -1450,6 +1552,51 @@ mark.obs-find-match.is-current {
   font-weight: 500;
 }
 
+/* 2x2 Theme Grid Selector */
+.obs-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+  background: var(--bg-primary);
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.obs-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.obs-theme-btn:hover {
+  background: var(--bg-modifier-hover);
+  color: var(--text-normal);
+}
+
+.obs-theme-btn.is-active {
+  background: var(--interactive-accent);
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.obs-theme-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  flex-shrink: 0;
+}
+
 .obs-toggle-row {
   display: flex;
   align-items: center;
@@ -1458,6 +1605,10 @@ mark.obs-find-match.is-current {
   font-size: 12.5px;
   color: var(--text-normal);
   cursor: pointer;
+}
+
+.obs-toggle-row input[type='checkbox'] {
+  accent-color: var(--interactive-accent);
 }
 
 .obs-hover-preview {

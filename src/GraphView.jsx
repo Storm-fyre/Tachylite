@@ -66,10 +66,26 @@ function matchesGraphQuery(node, query) {
   });
 }
 
-function getThemeColors() {
+function getThemeColors(forcePitchBlack = false) {
   const styles = getComputedStyle(document.documentElement);
   const get = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
-  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const themeAttr = document.documentElement.getAttribute('data-theme') || 'dark';
+  const isLight = !forcePitchBlack && (themeAttr === 'light' || themeAttr === 'warm');
+
+  if (forcePitchBlack) {
+    return {
+      isLight: false,
+      bg: '#000000',
+      nodeDefault: get('--graph-node', '#9ca3af'),
+      nodeUnresolved: '#454545',
+      line: 'rgba(165, 165, 165, 0.25)',
+      lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.94)'),
+      accent: get('--text-accent', '#a88bfa'),
+      text: '#dadada',
+      focalText: '#ffffff',
+    };
+  }
+
   return {
     isLight,
     bg: get('--bg-primary', '#1e1e1e'),
@@ -82,6 +98,7 @@ function getThemeColors() {
     lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.92)'),
     accent: get('--text-accent', '#a88bfa'),
     text: get('--graph-text', isLight ? '#333333' : '#d2d2d2'),
+    focalText: isLight ? '#111111' : '#f3f3f3',
   };
 }
 
@@ -92,10 +109,13 @@ function getNodeRole(node) {
   const deg = node.degree || 0;
 
   if (tags.includes('subject-hub') || deg >= 16) return 'hub';
+  if (tags.includes('physics-subject-hub')) return 'branch';
   if (folder === 'trivia' || folder.startsWith('trivia/') || folder === 'good to know') {
     return 'trivia';
   }
-  if (deg <= 1 || folder.startsWith('how stuff works summary')) return 'summary';
+  if ((deg <= 1 && !folder.startsWith('physics/')) || folder.startsWith('how stuff works summary')) {
+    return 'summary';
+  }
   return 'chapter';
 }
 
@@ -110,6 +130,10 @@ function classifyLink(link) {
 
   if (rA === 'summary' || rB === 'summary') return 'summary';
   if (rA === 'hub' && rB === 'hub') return 'hub-loop';
+  if ((rA === 'hub' && rB === 'branch') || (rB === 'hub' && rA === 'branch')) {
+    return 'hub-branch';
+  }
+  if ((rA === 'branch' || rB === 'branch') && sameFolder) return 'branch-spoke';
   if ((rA === 'hub' || rB === 'hub') && sameFolder) return 'hub-spoke';
   if (rA === 'chapter' && rB === 'chapter' && sameFolder) return 'sibling';
   if (rA === 'trivia' || rB === 'trivia') return 'trivia';
@@ -125,7 +149,6 @@ function hashString(str) {
   return (h >>> 0) / 4294967295;
 }
 
-// Airy filament spoke geometry (avoids tight concentric "daisy" rings)
 function computeLinkDistance(link, baseDistance, isLocal) {
   if (isLocal) return baseDistance * 0.55;
   const kind = classifyLink(link);
@@ -138,6 +161,10 @@ function computeLinkDistance(link, baseDistance, isLocal) {
       return baseDistance * (0.78 + jitter * 0.65);
     case 'sibling':
       return baseDistance * (0.72 + jitter * 0.4);
+    case 'branch-spoke':
+      return baseDistance * (0.72 + jitter * 0.35);
+    case 'hub-branch':
+      return baseDistance * (1.08 + jitter * 0.3);
     case 'hub-spoke':
       return baseDistance * (0.94 + jitter * 0.85);
     case 'trivia':
@@ -150,7 +177,6 @@ function computeLinkDistance(link, baseDistance, isLocal) {
   }
 }
 
-// Balanced ~2.5:1 elasticity ratio: clean non-cluttered clusters woven into one unified web
 function computeLinkStrength(link, baseStrength, isLocal) {
   if (isLocal) return Math.min(1, baseStrength * 0.7);
   const kind = classifyLink(link);
@@ -158,6 +184,10 @@ function computeLinkStrength(link, baseStrength, isLocal) {
   switch (kind) {
     case 'summary':
       return Math.min(1, baseStrength * 0.72);
+    case 'branch-spoke':
+      return Math.min(1, baseStrength * 0.68);
+    case 'hub-branch':
+      return Math.min(1, baseStrength * 0.52);
     case 'hub-spoke':
       return Math.min(1, baseStrength * 0.54);
     case 'sibling':
@@ -172,7 +202,6 @@ function computeLinkStrength(link, baseStrength, isLocal) {
   }
 }
 
-// Smooth, near-uniform electrostatic repulsion for airy negative space
 function computeNodeCharge(node, baseRepel, isLocal) {
   if (isLocal) return -baseRepel * 26;
   const role = node.role || 'chapter';
@@ -180,6 +209,9 @@ function computeNodeCharge(node, baseRepel, isLocal) {
 
   if (role === 'hub') {
     return -baseRepel * (50 + Math.min(18, deg * 0.45));
+  }
+  if (role === 'branch') {
+    return -baseRepel * 44;
   }
   if (role === 'trivia') {
     return -baseRepel * 42;
@@ -190,21 +222,17 @@ function computeNodeCharge(node, baseRepel, isLocal) {
   return -baseRepel * 38;
 }
 
-// Minimal overlap-only floor (no artificial billiard-ball rigidity)
 function computeCollideRadius(node, isLocal) {
   if (isLocal) return 14;
   const role = node.role || 'chapter';
   if (role === 'hub') return 10;
+  if (role === 'branch') return 8;
   if (role === 'trivia') return 7;
   if (role === 'summary') return 5;
   return 6;
 }
 
-// Loose organic pre-seeding to prevent tangled crossings without forcing rigid circles
 function seedConstellationPositions(nodes, links, baseDistance) {
-  const hubs = nodes.filter((n) => n.role === 'hub');
-  if (hubs.length < 3) return;
-
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const adj = new Map();
   for (const l of links) {
@@ -216,96 +244,172 @@ function seedConstellationPositions(nodes, links, baseDistance) {
     adj.get(t).add(s);
   }
 
-  const hubRadius = baseDistance * 2.1;
-  const hubPos = new Map();
+  // Separate Physics Binary-Star cleanly from GS Airy Lotus
+  const isPhysicsNode = (n) => (n.path || '').toLowerCase().startsWith('physics/');
+  const gsNodes = nodes.filter((n) => !isPhysicsNode(n));
+  const phyNodes = nodes.filter((n) => isPhysicsNode(n));
+  const hasBothWebs = gsNodes.length > 0 && phyNodes.length > 0;
 
-  hubs.forEach((hub, idx) => {
-    const hRand = hashString(hub.id);
-    const angle = (idx / hubs.length) * Math.PI * 2 + (hRand - 0.5) * 0.28;
-    const ringScale = hubs.length > 10 && idx % 3 === 0 ? 0.52 + hRand * 0.14 : 0.88 + hRand * 0.24;
-    const r = hubRadius * ringScale;
-    if (!Number.isFinite(hub.x) || !Number.isFinite(hub.y)) {
-      hub.x = Math.cos(angle) * r;
-      hub.y = Math.sin(angle) * r;
+  const gsCenterX = hasBothWebs ? -baseDistance * 1.45 : 0;
+  const phyCenterX = hasBothWebs ? baseDistance * 3.05 : 0;
+
+  // --- Seed Web 1: Civil Service + Good to Know Airy Lotus ---
+  const gsHubs = gsNodes.filter((n) => n.role === 'hub');
+  if (gsHubs.length >= 2) {
+    const hubRadius = baseDistance * 2.1;
+    const hubPos = new Map();
+
+    gsHubs.forEach((hub, idx) => {
+      const hRand = hashString(hub.id);
+      const angle = (idx / gsHubs.length) * Math.PI * 2 + (hRand - 0.5) * 0.28;
+      const ringScale =
+        gsHubs.length > 10 && idx % 3 === 0 ? 0.52 + hRand * 0.14 : 0.88 + hRand * 0.24;
+      const r = hubRadius * ringScale;
+      if (!Number.isFinite(hub.x) || !Number.isFinite(hub.y)) {
+        hub.x = gsCenterX + Math.cos(angle) * r;
+        hub.y = Math.sin(angle) * r;
+      }
+      hubPos.set(hub.id, { x: hub.x, y: hub.y, angle });
+    });
+
+    const hubByFolder = new Map();
+    for (const h of gsHubs) {
+      if (h.folder) hubByFolder.set(h.folder, h);
     }
-    hubPos.set(hub.id, { x: hub.x, y: hub.y, angle });
-  });
 
-  const hubByFolder = new Map();
-  for (const h of hubs) {
-    if (h.folder) hubByFolder.set(h.folder, h);
-  }
-
-  const chaptersByHub = new Map();
-  for (const n of nodes) {
-    if (n.role !== 'chapter') continue;
-    let owner = n.folder ? hubByFolder.get(n.folder) : null;
-    if (!owner) {
-      for (const nbId of adj.get(n.id) || []) {
-        const nb = nodeById.get(nbId);
-        if (nb?.role === 'hub') {
-          owner = nb;
-          break;
+    const chaptersByHub = new Map();
+    for (const n of gsNodes) {
+      if (n.role !== 'chapter') continue;
+      let owner = n.folder ? hubByFolder.get(n.folder) : null;
+      if (!owner) {
+        for (const nbId of adj.get(n.id) || []) {
+          const nb = nodeById.get(nbId);
+          if (nb?.role === 'hub') {
+            owner = nb;
+            break;
+          }
         }
       }
-    }
-    if (owner) {
-      if (!chaptersByHub.has(owner.id)) chaptersByHub.set(owner.id, []);
-      chaptersByHub.get(owner.id).push(n);
-    }
-  }
-
-  for (const [hubId, chapters] of chaptersByHub.entries()) {
-    const hp = hubPos.get(hubId);
-    if (!hp) continue;
-    chapters.forEach((ch, i) => {
-      if (Number.isFinite(ch.x) && Number.isFinite(ch.y)) return;
-      const jitter = hashString(ch.id);
-      const a = hp.angle + (i / Math.max(1, chapters.length)) * Math.PI * 2 + (jitter - 0.5) * 0.35;
-      const rad = baseDistance * (0.7 + jitter * 0.45);
-      ch.x = hp.x + Math.cos(a) * rad;
-      ch.y = hp.y + Math.sin(a) * rad;
-    });
-  }
-
-  for (const n of nodes) {
-    if (n.role !== 'summary') continue;
-    if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
-    const nbs = [...(adj.get(n.id) || [])];
-    const parent = nbs.length ? nodeById.get(nbs[0]) : null;
-    if (parent && Number.isFinite(parent.x) && Number.isFinite(parent.y)) {
-      const ownerHub = parent.folder ? hubByFolder.get(parent.folder) : null;
-      const ox = ownerHub && Number.isFinite(ownerHub.x) ? ownerHub.x : 0;
-      const oy = ownerHub && Number.isFinite(ownerHub.y) ? ownerHub.y : 0;
-      const jitter = (hashString(n.id) - 0.5) * 0.6;
-      const outAngle = Math.atan2(parent.y - oy, parent.x - ox) + jitter;
-      const rad = baseDistance * (0.65 + hashString(`${n.id}:r`) * 0.3);
-      n.x = parent.x + Math.cos(outAngle) * rad;
-      n.y = parent.y + Math.sin(outAngle) * rad;
-    }
-  }
-
-  for (const n of nodes) {
-    if (n.role !== 'trivia') continue;
-    if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
-    let sx = 0;
-    let sy = 0;
-    let cnt = 0;
-    for (const nbId of adj.get(n.id) || []) {
-      const nb = nodeById.get(nbId);
-      if (nb && Number.isFinite(nb.x) && Number.isFinite(nb.y)) {
-        sx += nb.x;
-        sy += nb.y;
-        cnt += 1;
+      if (owner) {
+        if (!chaptersByHub.has(owner.id)) chaptersByHub.set(owner.id, []);
+        chaptersByHub.get(owner.id).push(n);
       }
     }
-    if (cnt > 0) {
-      const jitterA = hashString(n.id) * Math.PI * 2;
-      n.x = sx / cnt + Math.cos(jitterA) * 28;
-      n.y = sy / cnt + Math.sin(jitterA) * 28;
-    } else {
-      n.x = (hashString(n.id) - 0.5) * 120;
-      n.y = (hashString(`${n.id}!`) - 0.5) * 120;
+
+    for (const [hubId, chapters] of chaptersByHub.entries()) {
+      const hp = hubPos.get(hubId);
+      if (!hp) continue;
+      chapters.forEach((ch, i) => {
+        if (Number.isFinite(ch.x) && Number.isFinite(ch.y)) return;
+        const jitter = hashString(ch.id);
+        const a = hp.angle + (i / Math.max(1, chapters.length)) * Math.PI * 2 + (jitter - 0.5) * 0.35;
+        const rad = baseDistance * (0.7 + jitter * 0.45);
+        ch.x = hp.x + Math.cos(a) * rad;
+        ch.y = hp.y + Math.sin(a) * rad;
+      });
+    }
+
+    for (const n of gsNodes) {
+      if (n.role !== 'summary') continue;
+      if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
+      const nbs = [...(adj.get(n.id) || [])];
+      const parent = nbs.length ? nodeById.get(nbs[0]) : null;
+      if (parent && Number.isFinite(parent.x) && Number.isFinite(parent.y)) {
+        const ownerHub = parent.folder ? hubByFolder.get(parent.folder) : null;
+        const ox = ownerHub && Number.isFinite(ownerHub.x) ? ownerHub.x : gsCenterX;
+        const oy = ownerHub && Number.isFinite(ownerHub.y) ? ownerHub.y : 0;
+        const jitter = (hashString(n.id) - 0.5) * 0.6;
+        const outAngle = Math.atan2(parent.y - oy, parent.x - ox) + jitter;
+        const rad = baseDistance * (0.65 + hashString(`${n.id}:r`) * 0.3);
+        n.x = parent.x + Math.cos(outAngle) * rad;
+        n.y = parent.y + Math.sin(outAngle) * rad;
+      }
+    }
+
+    for (const n of gsNodes) {
+      if (n.role !== 'trivia') continue;
+      if (Number.isFinite(n.x) && Number.isFinite(n.y)) continue;
+      let sx = 0;
+      let sy = 0;
+      let cnt = 0;
+      for (const nbId of adj.get(n.id) || []) {
+        const nb = nodeById.get(nbId);
+        if (nb && Number.isFinite(nb.x) && Number.isFinite(nb.y)) {
+          sx += nb.x;
+          sy += nb.y;
+          cnt += 1;
+        }
+      }
+      if (cnt > 0) {
+        const jitterA = hashString(n.id) * Math.PI * 2;
+        n.x = sx / cnt + Math.cos(jitterA) * 28;
+        n.y = sy / cnt + Math.sin(jitterA) * 28;
+      } else {
+        n.x = gsCenterX + (hashString(n.id) - 0.5) * 120;
+        n.y = (hashString(`${n.id}!`) - 0.5) * 120;
+      }
+    }
+  }
+
+  // --- Seed Web 2: Physics Binary-Star Radial Tree ---
+  if (phyNodes.length > 0) {
+    const p1Core = phyNodes.find((n) => n.role === 'hub' && /paper 1/i.test(n.folder || n.title));
+    const p2Core = phyNodes.find((n) => n.role === 'hub' && /paper 2/i.test(n.folder || n.title));
+    const binaryHalfSep = baseDistance * 1.1;
+
+    if (p1Core && (!Number.isFinite(p1Core.x) || !Number.isFinite(p1Core.y))) {
+      p1Core.x = phyCenterX;
+      p1Core.y = -binaryHalfSep;
+    }
+    if (p2Core && (!Number.isFinite(p2Core.x) || !Number.isFinite(p2Core.y))) {
+      p2Core.x = phyCenterX;
+      p2Core.y = binaryHalfSep;
+    }
+
+    const branches = phyNodes.filter((n) => n.role === 'branch');
+    const p1Branches = branches.filter((b) => (b.folder || '').toLowerCase().startsWith('physics/paper 1'));
+    const p2Branches = branches.filter((b) => (b.folder || '').toLowerCase().startsWith('physics/paper 2'));
+
+    const placeBranches = (list, parent, baseDirAngle, spreadArc) => {
+      if (!parent || list.length === 0) return;
+      list.forEach((br, idx) => {
+        if (Number.isFinite(br.x) && Number.isFinite(br.y)) return;
+        const frac = list.length === 1 ? 0 : idx / (list.length - 1) - 0.5;
+        const angle = baseDirAngle + frac * spreadArc;
+        const rad = baseDistance * 1.15;
+        br.x = parent.x + Math.cos(angle) * rad;
+        br.y = parent.y + Math.sin(angle) * rad;
+      });
+    };
+
+    placeBranches(p1Branches, p1Core, -Math.PI / 2, Math.PI * 1.05);
+    placeBranches(p2Branches, p2Core, Math.PI / 2, Math.PI * 1.18);
+
+    const branchByFolder = new Map(branches.map((b) => [b.folder, b]));
+    const chByBranch = new Map();
+    for (const n of phyNodes) {
+      if (n.role === 'hub' || n.role === 'branch') continue;
+      const owner = branchByFolder.get(n.folder);
+      if (owner) {
+        if (!chByBranch.has(owner.id)) chByBranch.set(owner.id, []);
+        chByBranch.get(owner.id).push(n);
+      }
+    }
+
+    for (const br of branches) {
+      const chs = chByBranch.get(br.id) || [];
+      const parent = (br.folder || '').toLowerCase().startsWith('physics/paper 1') ? p1Core : p2Core;
+      const outAngle = parent
+        ? Math.atan2(br.y - parent.y, br.x - parent.x)
+        : 0;
+      chs.forEach((ch, idx) => {
+        if (Number.isFinite(ch.x) && Number.isFinite(ch.y)) return;
+        const frac = chs.length === 1 ? 0 : idx / (chs.length - 1) - 0.5;
+        const a = outAngle + frac * Math.PI * 0.9;
+        const r = baseDistance * (0.7 + hashString(ch.id) * 0.16);
+        ch.x = br.x + Math.cos(a) * r;
+        ch.y = br.y + Math.sin(a) * r;
+      });
     }
   }
 }
@@ -332,9 +436,7 @@ function wrapLabelLines(ctx, text, maxWidth, maxLines = 2) {
           while (rest.length > 4 && ctx.measureText(`${rest}…`).width > maxWidth) {
             rest = rest.slice(0, -1).trimEnd();
           }
-          lines.push(
-            ctx.measureText(rest).width <= maxWidth ? rest : `${rest}…`
-          );
+          lines.push(ctx.measureText(rest).width <= maxWidth ? rest : `${rest}…`);
           return lines;
         }
       } else {
@@ -389,6 +491,8 @@ export default function GraphView({
   vaultIndex,
   mode = 'global',
   isVisible = true,
+  pitchBlackGraph = true,
+  onTogglePitchBlackGraph = null,
   activeNotePath = null,
   focusNotePath = null,
   focusRevision = 0,
@@ -414,22 +518,13 @@ export default function GraphView({
   }));
 
   const [panelOpen, setPanelOpen] = useState(false);
-  const [themeColors, setThemeColors] = useState(getThemeColors);
+  const [themeColors, setThemeColors] = useState(() => getThemeColors(pitchBlackGraph));
 
-  // Interactive Color Group Controls (solo highlight or hide layer)
   const [hiddenGroups, setHiddenGroups] = useState(() => new Set());
   const [soloGroupIdx, setSoloGroupIdx] = useState(null);
-
-  // Subtle bottom status pill (lock or shortest-path clickable hop trail)
   const [statusPill, setStatusPill] = useState(null);
-
-  // Pinned interactive Quick Peek card (2nd two-finger tap / 2nd long-press on locked node)
   const [pinnedPeek, setPinnedPeek] = useState(null);
-
-  // Alt + Hover passive quick peek card (desktop)
   const [hoverPeek, setHoverPeek] = useState(null);
-
-  // Double-tap empty space dismisses visual highlight while keeping Crosshair locate working
   const [focusDismissed, setFocusDismissed] = useState(false);
 
   const locateTargetPath = focusNotePath || activeNotePath;
@@ -444,21 +539,20 @@ export default function GraphView({
     return map;
   }, [vaultIndex]);
 
-  // Re-enable visual highlight whenever a note is newly opened/viewed
   useEffect(() => {
     setFocusDismissed(false);
   }, [focusNotePath, focusRevision]);
 
   useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setThemeColors(getThemeColors());
-    });
+    const syncColors = () => setThemeColors(getThemeColors(pitchBlackGraph));
+    syncColors();
+    const observer = new MutationObserver(syncColors);
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['data-theme'],
     });
     return () => observer.disconnect();
-  }, []);
+  }, [pitchBlackGraph]);
 
   useEffect(() => {
     const cfg = vaultIndex?.graphConfig || {};
@@ -623,7 +717,6 @@ export default function GraphView({
   const overviewScaleRef = useRef(0.3);
   const hasFittedRef = useRef(false);
 
-  // Hover + Right-Click Lock + Pinned Peek + Shortest-Path + Fly-To refs
   const hoveredNodeRef = useRef(null);
   const spotlightNodeRef = useRef(null);
   const hoverBlendRef = useRef(0);
@@ -665,7 +758,6 @@ export default function GraphView({
   isVisibleRef.current = isVisible;
   pinnedPeekRef.current = pinnedPeek;
 
-  // Razor-sharp native Obsidian pinpoint radii (UNCHANGED)
   const getScreenRadius = (node, camK) => {
     const mult = settingsRef.current.nodeSizeMultiplier || 1;
     const relZoom =
@@ -751,7 +843,6 @@ export default function GraphView({
     return true;
   }, [mode]);
 
-  // Smooth camera glide & pulse ring to locate active/last-read note
   const flyToNote = useCallback((targetPath) => {
     const canvas = canvasRef.current;
     if (!canvas || !targetPath) return;
@@ -761,7 +852,6 @@ export default function GraphView({
     const rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
 
-    // Re-show visual highlight when user explicitly clicks Crosshair / presses F
     setFocusDismissed(false);
     activeNoteRef.current = targetPath;
 
@@ -814,7 +904,6 @@ export default function GraphView({
     pulseRafRef.current = requestAnimationFrame(animatePulse);
   }, []);
 
-  // When switching back to kept-alive Graph tab, fit once if never fitted yet, else redraw exact view
   useEffect(() => {
     if (!isVisible) return;
     const rafId = requestAnimationFrame(() => {
@@ -827,7 +916,6 @@ export default function GraphView({
     return () => cancelAnimationFrame(rafId);
   }, [isVisible, fitViewToNodes]);
 
-  // Keyboard shortcuts: Esc steps back/clears; F flies to active note; Alt toggles passive peek
   useEffect(() => {
     const onKeyDown = (e) => {
       if (!isVisibleRef.current) return;
@@ -948,7 +1036,6 @@ export default function GraphView({
     linksRef.current = links;
     neighborMapRef.current = neighborMap;
 
-    // Re-validate lock if graph filter changed
     if (lockedNodeRef.current) {
       const stillPresent = nodes.find((n) => n.id === lockedNodeRef.current.id);
       if (stillPresent) {
@@ -1049,8 +1136,6 @@ export default function GraphView({
     soloGroupIdx,
   ]);
 
-  // Smooth 140ms hover/lock spotlight animation + Canvas renderer + full interaction handlers
-  // Note: uses onSelectNoteRef so outer App re-renders NEVER tear down listeners or cancel animations.
   useEffect(() => {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
@@ -1258,7 +1343,6 @@ export default function GraphView({
       const activePath = activeNoteRef.current;
       const hovered = hoveredNodeRef.current;
 
-      // Active highlight priority: Path > Lock > SoloGroup > Hover
       const hasPath = pathNodesRef.current.size > 0;
       const locked = !hasPath ? lockedNodeRef.current : null;
       const lockDeg1 = lockDeg1Ref.current;
@@ -1287,7 +1371,6 @@ export default function GraphView({
       const zoomLineScale = Math.min(1.7, Math.max(0.85, Math.pow(Math.max(0.5, relZoom), 0.24)));
       const baseLineWidth = Math.max(0.4, 0.56 * (cfg.lineSizeMultiplier || 1) * zoomLineScale);
 
-      // 1. Draw translucent hairline edges
       for (const l of linksRef.current) {
         const s = l.source;
         const t = l.target;
@@ -1389,7 +1472,6 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 2. Draw crisp pinpoint nodes
       for (const n of nodesRef.current) {
         if (typeof n.x !== 'number' || typeof n.y !== 'number') continue;
         const sx = toScreenX(n.x);
@@ -1467,7 +1549,6 @@ export default function GraphView({
           ctx.stroke();
         }
 
-        // Expanding radar pulse ring when locating active note via Fly-To
         if (pulseRef.current && pulseRef.current.nodeId === n.id) {
           const pp = pulseRef.current.progress;
           const ringR = drawR + 4 + pp * 28;
@@ -1482,7 +1563,6 @@ export default function GraphView({
         ctx.restore();
       }
 
-      // 3. True Obsidian text-fade threshold (UNCHANGED)
       const fadeShift = Math.pow(1.42, cfg.textFadeMultiplier || 0);
       const baseStartZoom = 1.85 * fadeShift;
       const fadeSpan = 1.15 * fadeShift;
@@ -1505,12 +1585,14 @@ export default function GraphView({
         } else {
           const roleFactor =
             n.role === 'hub'
-              ? 0.72
-              : n.role === 'trivia'
-                ? 0.86
-                : n.role === 'chapter'
-                  ? 1.02
-                  : 1.24;
+              ? 0.7
+              : n.role === 'branch'
+                ? 0.8
+                : n.role === 'trivia'
+                  ? 0.86
+                  : n.role === 'chapter'
+                    ? 1.02
+                    : 1.24;
           const nodeStart = baseStartZoom * roleFactor;
           const rawT = (relZoom - nodeStart) / Math.max(0.35, fadeSpan);
           const clamped = Math.min(1, Math.max(0, rawT));
@@ -1573,8 +1655,13 @@ export default function GraphView({
             ? 5000
             : isBoostedNeighbor
               ? 2000 + (n.degree || 0)
-              : (n.role === 'hub' ? 1000 : n.role === 'trivia' ? 500 : 100) +
-                (n.degree || 0);
+              : (n.role === 'hub'
+                  ? 1000
+                  : n.role === 'branch'
+                    ? 750
+                    : n.role === 'trivia'
+                      ? 500
+                      : 100) + (n.degree || 0);
 
         labelCandidates.push({
           node: n,
@@ -1603,8 +1690,12 @@ export default function GraphView({
 
       for (const item of labelCandidates) {
         const { node, sx, sy, alpha, isFocal, isActiveNote } = item;
-        const fontSize = isFocal ? 12.8 : node.role === 'hub' ? baseFontSize + 0.7 : baseFontSize;
-        const fontWeight = isFocal || node.role === 'hub' ? '500' : '400';
+        const fontSize = isFocal
+          ? 12.8
+          : node.role === 'hub' || node.role === 'branch'
+            ? baseFontSize + 0.6
+            : baseFontSize;
+        const fontWeight = isFocal || node.role === 'hub' || node.role === 'branch' ? '500' : '400';
         const wrapW = isFocal ? 220 : baseWrapWidth;
 
         ctx.font = `${fontWeight} ${fontSize.toFixed(1)}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
@@ -1642,12 +1733,8 @@ export default function GraphView({
         placedBoxes.push([x1, y1, x2, y2]);
 
         ctx.save();
-        ctx.globalAlpha = isFocal ? Math.min(1, alpha) : alpha * 0.9;
-        ctx.fillStyle = isFocal
-          ? colors.isLight
-            ? '#111111'
-            : '#f3f3f3'
-          : colors.text;
+        ctx.globalAlpha = isFocal ? Math.min(1, alpha) : alpha * 0.92;
+        ctx.fillStyle = isFocal ? colors.focalText : colors.text;
 
         for (let i = 0; i < lines.length; i++) {
           ctx.fillText(lines[i], sx, startY + i * lineHeight);
@@ -1706,7 +1793,7 @@ export default function GraphView({
     let longPressTimer = null;
     let isLongPress = false;
     let touchTargetNode = null;
-    let pendingDismissAction = null; // 'peek' | 'unlock' | 'path' | null
+    let pendingDismissAction = null;
 
     const clearLongPressTimer = () => {
       if (longPressTimer) {
@@ -1783,10 +1870,6 @@ export default function GraphView({
         flyRafRef.current = null;
       }
 
-      // Desktop Right-Click / Two-Finger Trackpad Tap:
-      // 1st tap on node -> Lock 1st-degree connections
-      // 2nd tap on SAME locked node -> Open interactive Quick Peek Card
-      // Tap on empty space -> 2-step rewind (Peek -> Lock -> Normal)
       if (e.pointerType === 'mouse' && e.button === 2 && mode === 'global') {
         e.preventDefault();
         const hit = hitTestNode(e.clientX, e.clientY, false);
@@ -1817,7 +1900,6 @@ export default function GraphView({
       const isTouch = e.pointerType === 'touch';
       const hit = hitTestNode(e.clientX, e.clientY, isTouch);
 
-      // Shift + Click Shortest-Path Synapse Tracer
       if (mode === 'global' && !isTouch && e.shiftKey && e.button === 0) {
         if (hit && !hit.unresolved) {
           handleShiftPathClick(hit);
@@ -1852,7 +1934,6 @@ export default function GraphView({
 
       if (isTouch) {
         if (hit) {
-          // If locked or path active and user taps a non-glowing node: step back on tap
           if (lockedNodeRef.current && !isNodeGlowingInLock(hit.id)) {
             pendingDismissAction = pinnedPeekRef.current ? 'peek' : 'unlock';
             isPanning = true;
@@ -1896,7 +1977,6 @@ export default function GraphView({
         return;
       }
 
-      // Desktop left/middle click when a Lock or Shortest-Path is active
       if (lockedNodeRef.current) {
         if (hit && isNodeGlowingInLock(hit.id)) {
           draggedNodeRef.current = hit;
@@ -1904,7 +1984,6 @@ export default function GraphView({
           hit.fy = hit.y;
           simRef.current?.alphaTarget(0.25).restart();
         } else {
-          // 2-step empty/dimmed-space dismiss: first closes Peek Card, next unlocks Lock
           pendingDismissAction = pinnedPeekRef.current ? 'peek' : 'unlock';
           isPanning = true;
         }
@@ -1996,7 +2075,6 @@ export default function GraphView({
       if (e.pointerType !== 'touch') {
         const hit = hitTestNode(e.clientX, e.clientY, false);
 
-        // Passive Alt+Hover Quick Peek Card (only when no pinned peek card is open)
         if (
           mode === 'global' &&
           !pinnedPeekRef.current &&
@@ -2200,7 +2278,6 @@ export default function GraphView({
         }}
       />
 
-      {/* Top-right Obsidian Graph Controls */}
       <div className="obs-graph-controls-bar">
         <button
           className={`obs-icon-btn ${panelOpen ? 'is-active' : ''}`}
@@ -2238,7 +2315,6 @@ export default function GraphView({
         </button>
       </div>
 
-      {/* Subtle Bottom Status Pill (Lock status or Clickable Shortest-Path Hop Trail) */}
       {mode === 'global' && statusPill && (
         <div className="obs-graph-pill">
           {statusPill.kind === 'path-chain' ? (
@@ -2298,7 +2374,6 @@ export default function GraphView({
         </div>
       )}
 
-      {/* Pinned Interactive Quick Peek Card (2nd two-finger tap / 2nd long-press) */}
       {mode === 'global' && pinnedPeek && (
         <div
           className="obs-graph-peek"
@@ -2377,7 +2452,6 @@ export default function GraphView({
         </div>
       )}
 
-      {/* Passive Alt + Hover Quick Peek Card (desktop) */}
       {mode === 'global' && hoverPeek && !pinnedPeek && (
         <div
           className="obs-hover-preview"
@@ -2400,7 +2474,6 @@ export default function GraphView({
         </div>
       )}
 
-      {/* Collapsible Graph Settings Panel */}
       {panelOpen && (
         <div className="obs-graph-panel">
           <div
@@ -2529,6 +2602,16 @@ export default function GraphView({
 
           <div className="obs-graph-section">
             <div className="obs-graph-section-title">Display</div>
+            {onTogglePitchBlackGraph && (
+              <label className="obs-toggle-row">
+                <span>Pitch-black canvas</span>
+                <input
+                  type="checkbox"
+                  checked={pitchBlackGraph}
+                  onChange={(e) => onTogglePitchBlackGraph(e.target.checked)}
+                />
+              </label>
+            )}
             <label className="obs-toggle-row">
               <span>Arrows</span>
               <input
