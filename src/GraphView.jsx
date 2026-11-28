@@ -66,29 +66,15 @@ function matchesGraphQuery(node, query) {
   });
 }
 
-function getThemeColors(forcePitchBlack = false) {
+function getThemeColors() {
   const styles = getComputedStyle(document.documentElement);
   const get = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
   const themeAttr = document.documentElement.getAttribute('data-theme') || 'dark';
-  const isLight = !forcePitchBlack && (themeAttr === 'light' || themeAttr === 'warm');
-
-  if (forcePitchBlack) {
-    return {
-      isLight: false,
-      bg: '#000000',
-      nodeDefault: get('--graph-node', '#9ca3af'),
-      nodeUnresolved: '#454545',
-      line: 'rgba(165, 165, 165, 0.25)',
-      lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.94)'),
-      accent: get('--text-accent', '#a88bfa'),
-      text: '#dadada',
-      focalText: '#ffffff',
-    };
-  }
+  const isLight = themeAttr === 'light' || themeAttr === 'warm';
 
   return {
     isLight,
-    bg: get('--bg-primary', '#1e1e1e'),
+    bg: get('--bg-primary', themeAttr === 'pitch-black' ? '#000000' : '#1e1e1e'),
     nodeDefault: get('--graph-node', '#9a9a9a'),
     nodeUnresolved: get('--graph-node-unresolved', '#4e4e4e'),
     line: get(
@@ -97,8 +83,8 @@ function getThemeColors(forcePitchBlack = false) {
     ),
     lineActive: get('--graph-line-active', 'rgba(168, 139, 250, 0.92)'),
     accent: get('--text-accent', '#a88bfa'),
-    text: get('--graph-text', isLight ? '#333333' : '#d2d2d2'),
-    focalText: isLight ? '#111111' : '#f3f3f3',
+    text: get('--graph-text', isLight ? '#333333' : '#d4d4d4'),
+    focalText: isLight ? '#111111' : themeAttr === 'pitch-black' ? '#ffffff' : '#f3f3f3',
   };
 }
 
@@ -244,7 +230,6 @@ function seedConstellationPositions(nodes, links, baseDistance) {
     adj.get(t).add(s);
   }
 
-  // Separate Physics Binary-Star cleanly from GS Airy Lotus
   const isPhysicsNode = (n) => (n.path || '').toLowerCase().startsWith('physics/');
   const gsNodes = nodes.filter((n) => !isPhysicsNode(n));
   const phyNodes = nodes.filter((n) => isPhysicsNode(n));
@@ -491,8 +476,6 @@ export default function GraphView({
   vaultIndex,
   mode = 'global',
   isVisible = true,
-  pitchBlackGraph = true,
-  onTogglePitchBlackGraph = null,
   activeNotePath = null,
   focusNotePath = null,
   focusRevision = 0,
@@ -518,7 +501,7 @@ export default function GraphView({
   }));
 
   const [panelOpen, setPanelOpen] = useState(false);
-  const [themeColors, setThemeColors] = useState(() => getThemeColors(pitchBlackGraph));
+  const [themeColors, setThemeColors] = useState(getThemeColors);
 
   const [hiddenGroups, setHiddenGroups] = useState(() => new Set());
   const [soloGroupIdx, setSoloGroupIdx] = useState(null);
@@ -544,7 +527,7 @@ export default function GraphView({
   }, [focusNotePath, focusRevision]);
 
   useEffect(() => {
-    const syncColors = () => setThemeColors(getThemeColors(pitchBlackGraph));
+    const syncColors = () => setThemeColors(getThemeColors());
     syncColors();
     const observer = new MutationObserver(syncColors);
     observer.observe(document.documentElement, {
@@ -552,7 +535,7 @@ export default function GraphView({
       attributeFilter: ['data-theme'],
     });
     return () => observer.disconnect();
-  }, [pitchBlackGraph]);
+  }, []);
 
   useEffect(() => {
     const cfg = vaultIndex?.graphConfig || {};
@@ -2602,16 +2585,6 @@ export default function GraphView({
 
           <div className="obs-graph-section">
             <div className="obs-graph-section-title">Display</div>
-            {onTogglePitchBlackGraph && (
-              <label className="obs-toggle-row">
-                <span>Pitch-black canvas</span>
-                <input
-                  type="checkbox"
-                  checked={pitchBlackGraph}
-                  onChange={(e) => onTogglePitchBlackGraph(e.target.checked)}
-                />
-              </label>
-            )}
             <label className="obs-toggle-row">
               <span>Arrows</span>
               <input

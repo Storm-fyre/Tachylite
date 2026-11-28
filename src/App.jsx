@@ -27,21 +27,22 @@ import './obsidian.css';
 import Reader, { RightInspector } from './Reader.jsx';
 import GraphView from './GraphView.jsx';
 
-const PREFS_KEY = 'obsidian-web-prefs-v1';
+const PREFS_KEY = 'obsidian-web-prefs-v2';
 const BOOKMARKS_PREFIX = 'obsidian-web-bookmarks-';
 
 const DEFAULT_PREFS = {
-  theme: 'dark',
-  pitchBlackGraph: true,
+  graphTheme: 'pitch-black', // 'Midnight' (#000000) whole site on Graph view
+  readingTheme: 'dark',      // 'Dark' (#1e1e1e) whole site when reading notes
+  syncGraphTheme: false,     // OFF by default: Graph = Midnight, Reading = Dark
   fontSize: 16,
   fontFamily: 'sans',
   readableWidth: true,
 };
 
 const THEME_OPTIONS = [
+  { id: 'pitch-black', label: 'Midnight', dot: '#000000' },
   { id: 'dark', label: 'Dark', dot: '#262626' },
-  { id: 'pitch-black', label: 'Pitch Black', dot: '#000000' },
-  { id: 'warm', label: 'Warm', dot: '#e8dac3' },
+  { id: 'warm', label: 'Sepia', dot: '#e8dac3' },
   { id: 'light', label: 'Light', dot: '#f5f5f5' },
 ];
 
@@ -235,6 +236,7 @@ function App() {
     [tabs, activeTabId]
   );
 
+  const isGraphActive = !activeTab || activeTab.type === 'graph';
   const activeNotePath = activeTab?.type === 'note' ? activeTab.path : null;
   const displayVaultName = useMemo(
     () => getDisplayVaultName(vaultIndex, activeVaultId),
@@ -246,13 +248,27 @@ function App() {
     return vaultIndex.notes.find((n) => n.path === activeNotePath) || null;
   }, [vaultIndex, activeNotePath]);
 
-  const effectivePitchBlackGraph = Boolean(
-    prefs.pitchBlackGraph || prefs.theme === 'pitch-black'
-  );
+  // Unified Whole-Site Theme: menus, sidebars, tabs, and canvas/reader always switch together
+  const currentSiteTheme = prefs.syncGraphTheme
+    ? prefs.readingTheme
+    : isGraphActive
+      ? prefs.graphTheme
+      : prefs.readingTheme;
 
-  const handleTogglePitchBlackGraph = useCallback((nextVal) => {
-    setPrefs((p) => ({ ...p, pitchBlackGraph: Boolean(nextVal) }));
-  }, []);
+  const handleSelectTheme = useCallback(
+    (themeId) => {
+      setPrefs((p) => {
+        if (p.syncGraphTheme) {
+          return { ...p, readingTheme: themeId, graphTheme: themeId };
+        }
+        if (isGraphActive) {
+          return { ...p, graphTheme: themeId };
+        }
+        return { ...p, readingTheme: themeId };
+      });
+    },
+    [isGraphActive]
+  );
 
   useEffect(() => {
     if (activeNotePath) {
@@ -278,7 +294,7 @@ function App() {
     }
   }, [activeVaultId, vaultIndex, activeTab?.type, activeNoteMeta, displayVaultName]);
 
-  // Apply reading preferences & mobile theme-color meta tag across all 4 themes
+  // Apply unified whole-site theme & reading preferences
   useEffect(() => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
@@ -286,7 +302,7 @@ function App() {
       // ignore storage errors
     }
     const root = document.documentElement;
-    root.setAttribute('data-theme', prefs.theme);
+    root.setAttribute('data-theme', currentSiteTheme);
     root.style.setProperty('--reader-font-size', `${prefs.fontSize}px`);
     const fontMap = {
       sans: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -303,13 +319,9 @@ function App() {
         warm: '#ebe0ce',
         light: '#f5f5f5',
       };
-      const color =
-        activeTab?.type === 'graph' && effectivePitchBlackGraph
-          ? '#000000'
-          : metaColorMap[prefs.theme] || '#1e1e1e';
-      themeMeta.setAttribute('content', color);
+      themeMeta.setAttribute('content', metaColorMap[currentSiteTheme] || '#1e1e1e');
     }
-  }, [prefs, activeTab?.type, effectivePitchBlackGraph]);
+  }, [prefs, currentSiteTheme]);
 
   useEffect(() => {
     if (!showSettings) return;
@@ -1345,7 +1357,7 @@ function App() {
               <button
                 className={`obs-icon-btn ${showSettings ? 'is-active' : ''}`}
                 onClick={() => setShowSettings((s) => !s)}
-                title="Reading appearance & themes"
+                title="Appearance & reading themes"
               >
                 <SlidersHorizontal size={15} />
               </button>
@@ -1391,14 +1403,20 @@ function App() {
                   </div>
 
                   <div className="obs-slider-row" style={{ marginBottom: 8 }}>
-                    <span>Reading theme</span>
+                    <span>
+                      {prefs.syncGraphTheme
+                        ? 'Site theme (Graph & Reading)'
+                        : isGraphActive
+                          ? 'Graph theme'
+                          : 'Reading theme'}
+                    </span>
                     <div className="obs-theme-grid">
                       {THEME_OPTIONS.map((t) => (
                         <button
                           key={t.id}
                           type="button"
-                          className={`obs-theme-btn ${prefs.theme === t.id ? 'is-active' : ''}`}
-                          onClick={() => setPrefs((p) => ({ ...p, theme: t.id }))}
+                          className={`obs-theme-btn ${currentSiteTheme === t.id ? 'is-active' : ''}`}
+                          onClick={() => handleSelectTheme(t.id)}
                         >
                           <span
                             className="obs-theme-swatch"
@@ -1411,13 +1429,12 @@ function App() {
                   </div>
 
                   <label className="obs-toggle-row">
-                    <span>Pitch-black graph canvas</span>
+                    <span>Same theme as reading space</span>
                     <input
                       type="checkbox"
-                      checked={effectivePitchBlackGraph}
-                      disabled={prefs.theme === 'pitch-black'}
+                      checked={prefs.syncGraphTheme}
                       onChange={(e) =>
-                        setPrefs((p) => ({ ...p, pitchBlackGraph: e.target.checked }))
+                        setPrefs((p) => ({ ...p, syncGraphTheme: e.target.checked }))
                       }
                     />
                   </label>
@@ -1446,8 +1463,6 @@ function App() {
                   vaultIndex={vaultIndex}
                   mode="global"
                   isVisible={activeTab?.type === 'graph'}
-                  pitchBlackGraph={effectivePitchBlackGraph}
-                  onTogglePitchBlackGraph={handleTogglePitchBlackGraph}
                   activeNotePath={activeNotePath}
                   focusNotePath={lastOpenedNotePath}
                   focusRevision={focusRevision}
@@ -1486,7 +1501,6 @@ function App() {
             activeHeadingSlug={activeHeadingSlug}
             rightTab={rightTab}
             setRightTab={setRightTab}
-            pitchBlackGraph={effectivePitchBlackGraph}
             onClose={handleCloseRightSidebar}
             onNavigateNote={openNote}
           />
